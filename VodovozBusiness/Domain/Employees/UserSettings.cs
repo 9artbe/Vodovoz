@@ -2,6 +2,8 @@
 using System.ComponentModel.DataAnnotations;
 using QS.DomainModel.Entity;
 using QS.DomainModel.Entity.EntityPermissions;
+using Vodovoz.Domain.Client;
+using Vodovoz.Domain.Complaints;
 using Vodovoz.Domain.Goods;
 using Vodovoz.Domain.Store;
 
@@ -39,6 +41,30 @@ namespace Vodovoz.Domain.Employees
 		public virtual IconsSize ToolBarIconsSize {
 			get { return toolBarIconsSize; }
 			set { SetField (ref toolBarIconsSize, value, () => ToolBarIconsSize); }
+		}
+
+		private bool reorderTabs;
+		
+		[Display(Name = "Перемещение вкладок")]
+		public virtual bool ReorderTabs {
+			get => reorderTabs;
+			set => SetField(ref reorderTabs, value);
+		}
+
+		private bool highlightTabsWithColor;
+
+		[Display(Name = "Выделение вкладок цветом")]
+		public virtual bool HighlightTabsWithColor {
+			get => highlightTabsWithColor;
+			set => SetField(ref highlightTabsWithColor, value);
+		}
+		
+		private bool keepTabColor;
+
+		[Display(Name = "Сохранять цвет вкладки")]
+		public virtual bool KeepTabColor {
+			get => keepTabColor;
+			set => SetField(ref keepTabColor, value);
 		}
 
 		Warehouse defaultWarehouse;
@@ -113,12 +139,64 @@ namespace Vodovoz.Domain.Employees
 			set => SetField(ref logisticChainStoreOrders, value, () => LogisticChainStoreOrders);
 		}
 
+		/// <summary>
+        /// Использовать отдел сотрудника
+        /// </summary>
+
+        private bool useEmployeeSubdivision;
+        [Display(Name = "Использовать отдел сотрудника")]
+        public virtual bool UseEmployeeSubdivision
+        {
+            get => useEmployeeSubdivision;
+            set => SetField(ref useEmployeeSubdivision, value, () => UseEmployeeSubdivision);
+        }
 
 
+        /// <summary>
+        /// Для установки фильтра подразделений
+        /// </summary>
+        private Subdivision defaultSubdivision;
 
-		#endregion
+        [Display(Name = "Подразделение")]
+        public virtual Subdivision DefaultSubdivision
+        {
+            get { return defaultSubdivision; }
+            set
+            {
+                SetField(ref defaultSubdivision, value, () => DefaultSubdivision);
+            }
+        }
 
-		public UserSettings ()
+        /// <summary>
+        /// Для установки дефолтного контрагента в отчете по оплатам
+        /// </summary>
+        private Counterparty defaultCounterparty;
+        [Display(Name = "Контрагент")]
+        public virtual Counterparty DefaultCounterparty
+        {
+            get => defaultCounterparty;
+            set => SetField(ref defaultCounterparty, value);
+        }
+
+        /// <summary>
+        /// Статус рекламации
+        /// </summary>
+        private ComplaintStatuses? defaultComplaintStatus;
+
+        [Display(Name = "Статус рекламации")]
+        public virtual ComplaintStatuses? DefaultComplaintStatus
+        {
+            get { return defaultComplaintStatus; }
+            set
+            {
+                SetField(ref defaultComplaintStatus, value, () => DefaultComplaintStatus);
+            }
+        }
+
+
+        #endregion
+
+        public UserSettings ()
 		{
 		}
 

@@ -20,22 +20,24 @@ using Vodovoz.Domain.Goods;
 using Vodovoz.Domain.Orders;
 using Vodovoz.Domain.Orders.OrdersWithoutShipment;
 using Vodovoz.EntityRepositories;
-using Vodovoz.EntityRepositories.Employees;
 using Vodovoz.EntityRepositories.Goods;
+using Vodovoz.EntityRepositories.Orders;
 using Vodovoz.FilterViewModels.Goods;
 using Vodovoz.Infrastructure.Services;
 using Vodovoz.JournalViewModels;
+using Vodovoz.Parameters;
 
 namespace Vodovoz.ViewModels.Orders.OrdersWithoutShipment
 {
 	public class OrderWithoutShipmentForAdvancePaymentViewModel : EntityTabViewModelBase<OrderWithoutShipmentForAdvancePayment>, ITdiTabAddedNotifier
 	{
-		private readonly IEmployeeService employeeService;
-		private readonly IEntityAutocompleteSelectorFactory nomenclatureSelectorFactory;
-		private readonly IEntityAutocompleteSelectorFactory counterpartySelectorFactory;
-		private readonly INomenclatureRepository nomenclatureRepository;
-		private readonly IUserRepository userRepository;
-		
+		private readonly IEmployeeService _employeeService;
+		private readonly IEntityAutocompleteSelectorFactory _nomenclatureSelectorFactory;
+		private readonly IEntityAutocompleteSelectorFactory _counterpartySelectorFactory;
+		private readonly INomenclatureRepository _nomenclatureRepository;
+		private readonly IUserRepository _userRepository;
+		private readonly IParametersProvider _parametersProvider;
+
 		private object selectedItem;
 		public object SelectedItem {
 			get => selectedItem;
@@ -57,15 +59,21 @@ namespace Vodovoz.ViewModels.Orders.OrdersWithoutShipment
 			IEntityAutocompleteSelectorFactory nomenclatureSelectorFactory,
 			IEntityAutocompleteSelectorFactory counterpartySelectorFactory,
 			INomenclatureRepository nomenclatureRepository,
-			IUserRepository userRepository) : base(uowBuilder, uowFactory, commonServices)
+			IUserRepository userRepository,
+			IOrderRepository orderRepository,
+			IParametersProvider parametersProvider) : base(uowBuilder, uowFactory, commonServices)
 		{
-			this.employeeService = employeeService ?? throw new ArgumentNullException(nameof(employeeService));
-			this.nomenclatureRepository = nomenclatureRepository ?? throw new ArgumentNullException(nameof(nomenclatureRepository));
-			this.userRepository = userRepository ?? throw new ArgumentNullException(nameof(userRepository));
-			this.nomenclatureSelectorFactory = nomenclatureSelectorFactory ?? throw new ArgumentNullException(nameof(nomenclatureSelectorFactory));
-			this.counterpartySelectorFactory = counterpartySelectorFactory ?? throw new ArgumentNullException(nameof(counterpartySelectorFactory));
+			_employeeService = employeeService ?? throw new ArgumentNullException(nameof(employeeService));
+			_nomenclatureRepository = nomenclatureRepository ?? throw new ArgumentNullException(nameof(nomenclatureRepository));
+			_userRepository = userRepository ?? throw new ArgumentNullException(nameof(userRepository));
+			_parametersProvider = parametersProvider ?? throw new ArgumentNullException(nameof(parametersProvider));
+			OrderRepository = orderRepository ?? throw new ArgumentNullException(nameof(orderRepository));
+			_nomenclatureSelectorFactory = nomenclatureSelectorFactory ?? throw new ArgumentNullException(nameof(nomenclatureSelectorFactory));
+			_counterpartySelectorFactory = counterpartySelectorFactory ?? throw new ArgumentNullException(nameof(counterpartySelectorFactory));
 			
-			bool canCreateBillsWithoutShipment = CommonServices.PermissionService.ValidateUserPresetPermission("can_create_bills_without_shipment", CurrentUser.Id);
+			bool canCreateBillsWithoutShipment = 
+				CommonServices.PermissionService.ValidateUserPresetPermission("can_create_bills_without_shipment", CurrentUser.Id);
+			var currentEmployee = employeeService.GetEmployeeForUser(UoW, UserService.CurrentUserId);
 			
 			if (uowBuilder.IsNewEntity)
 			{
@@ -77,7 +85,7 @@ namespace Vodovoz.ViewModels.Orders.OrdersWithoutShipment
 					}
 					else
 					{
-						Entity.Author = EmployeeSingletonRepository.GetInstance().GetEmployeeForCurrentUser(UoW);
+						Entity.Author = currentEmployee;
 					}
 				}
 				else
@@ -89,8 +97,11 @@ namespace Vodovoz.ViewModels.Orders.OrdersWithoutShipment
 			TabName = "Счет без отгрузки на предоплату";
 			EntityUoWBuilder = uowBuilder;
 			
-			SendDocViewModel = new SendDocumentByEmailViewModel(new EmailRepository(), EmployeeSingletonRepository.GetInstance(), commonServices.InteractiveService, UoW);
+			SendDocViewModel = new SendDocumentByEmailViewModel(
+				new EmailRepository(), currentEmployee, commonServices.InteractiveService, _parametersProvider, UoW);
 		}
+		
+		public IOrderRepository OrderRepository { get; }
 
 		#region Commands
 
@@ -117,11 +128,11 @@ namespace Vodovoz.ViewModels.Orders.OrdersWithoutShipment
 					nomenclatureFilter,
 					UnitOfWorkFactory,
 					ServicesConfig.CommonServices,
-					employeeService,
-					nomenclatureSelectorFactory,
-					counterpartySelectorFactory,
-					nomenclatureRepository,
-					userRepository
+					_employeeService,
+					_nomenclatureSelectorFactory,
+					_counterpartySelectorFactory,
+					_nomenclatureRepository,
+					_userRepository
 				) {
 					SelectionMode = JournalSelectionMode.Single,
 				};
@@ -140,7 +151,7 @@ namespace Vodovoz.ViewModels.Orders.OrdersWithoutShipment
 
 		private DelegateCommand cancelCommand;
 		public DelegateCommand CancelCommand => cancelCommand ?? (cancelCommand = new DelegateCommand(
-			() =>Close(false, CloseSource.Cancel),
+			() =>Close(true, CloseSource.Cancel),
 			() => true
 		));
 
@@ -192,12 +203,11 @@ namespace Vodovoz.ViewModels.Orders.OrdersWithoutShipment
 
 		void TryAddNomenclature(Nomenclature nomenclature, int count = 0, decimal discount = 0, DiscountReason discountReason = null)
 		{
-			if(nomenclature.ProductGroup != null)
-				if(nomenclature.ProductGroup.IsOnlineStore && !ServicesConfig.CommonServices.CurrentPermissionService
-					.ValidatePresetPermission("can_add_online_store_nomenclatures_to_order")) {
-					MessageDialogHelper.RunWarningDialog("У вас недостаточно прав для добавления на продажу номенклатуры интернет магазина");
-					return;
-				}
+			if(nomenclature.OnlineStore != null && !ServicesConfig.CommonServices.CurrentPermissionService
+				.ValidatePresetPermission("can_add_online_store_nomenclatures_to_order")) {
+				MessageDialogHelper.RunWarningDialog("У вас недостаточно прав для добавления на продажу номенклатуры интернет магазина");
+				return;
+			}
 
 			Entity.AddNomenclature(nomenclature, count, discount, false, discountReason);
 		}

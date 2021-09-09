@@ -12,7 +12,7 @@ namespace Vodovoz.ViewModels.Mango.Talks
 
 		public TalkViewModelBase(INavigationManager navigation, MangoManager manager) : base(navigation)
 		{
-			this.MangoManager = manager ?? throw new ArgumentNullException(nameof(manager));
+			MangoManager = manager ?? throw new ArgumentNullException(nameof(manager));
 			ActiveCall = MangoManager.CurrentTalk ?? MangoManager.CurrentHold;
 			manager.PropertyChanged += Manager_PropertyChanged;
 			SetTitle();
@@ -55,12 +55,12 @@ namespace Vodovoz.ViewModels.Mango.Talks
 		public void FinishCallCommand()
 		{
 			MangoManager.HangUp();
-			Close(false, CloseSource.Self);
+			Close(true, CloseSource.Self);
 		}
 
 		public void ForwardCallCommand()
 		{
-			Action action = () => { Close(false, CloseSource.Self); };
+			Action action = () => { Close(true, CloseSource.Self); };
 			IPage page = NavigationManager.OpenViewModel<SubscriberSelectionViewModel, MangoManager, SubscriberSelectionViewModel.DialogType>
 			(this, MangoManager, SubscriberSelectionViewModel.DialogType.Transfer);
 		}

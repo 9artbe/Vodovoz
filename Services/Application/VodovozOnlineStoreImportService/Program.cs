@@ -11,7 +11,6 @@ using NLog;
 using OnlineStoreImportService;
 using QS.Project.DB;
 using QSProjectsLib;
-using QSSupportLib;
 using Vodovoz.EntityRepositories.Goods;
 using Vodovoz.Parameters;
 using Vodovoz.Services;
@@ -72,7 +71,6 @@ namespace VodovozOnlineStoreImportService
 						Assembly.GetAssembly (typeof(QS.Project.Domain.UserBase))
 				});
 
-				MainSupport.LoadBaseParameters();
 				QS.HistoryLog.HistoryMain.Enable();
 			}
 			catch(Exception ex) {
@@ -80,7 +78,8 @@ namespace VodovozOnlineStoreImportService
 			}
 
 			try {
-				INomenclatureParametersProvider nomenclatureParametersProvider = new NomenclatureParametersProvider();
+				INomenclatureParametersProvider nomenclatureParametersProvider =
+					new NomenclatureParametersProvider(new ParametersProvider());
 				INomenclatureRepository nomenclatureRepository = new NomenclatureRepository(nomenclatureParametersProvider);
 				
 				ImporterDataFromOnlineStore importer = new ImporterDataFromOnlineStore(

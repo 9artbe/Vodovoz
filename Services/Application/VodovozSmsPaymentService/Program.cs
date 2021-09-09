@@ -6,16 +6,15 @@ using System.ServiceModel.Description;
 using System.ServiceModel.Dispatcher;
 using System.Threading;
 using Android;
+using Microsoft.Extensions.Configuration;
 using Mono.Unix;
 using Mono.Unix.Native;
 using MySql.Data.MySqlClient;
-using Nini.Config;
 using NLog;
 using QS.Project.DB;
 using QSProjectsLib;
-using QSSupportLib;
 using SmsPaymentService;
-using Vodovoz.Core.DataService;
+using Vodovoz.Models;
 using Vodovoz.Parameters;
 
 namespace VodovozSmsPaymentService
@@ -46,25 +45,31 @@ namespace VodovozSmsPaymentService
 		{
 			AppDomain.CurrentDomain.UnhandledException += AppDomain_CurrentDomain_UnhandledException;
 
-			try {
-				IniConfigSource confFile = new IniConfigSource(configFile);
-				confFile.Reload();
-				IConfig serviceConfig = confFile.Configs["Service"];
-				serviceHostName = serviceConfig.GetString("service_host_name");
-				servicePort = serviceConfig.GetString("service_port");
-				serviceWebPort = serviceConfig.GetString("service_web_port");
-				driverServiceHostName = serviceConfig.GetString("driver_service_host_name");
-				driverServicePort = serviceConfig.GetString("driver_service_port");
+			IConfiguration configuration;
 
-				IConfig bitrixConfig = confFile.Configs["Bitrix"];
-				baseAddress = bitrixConfig.GetString("base_address");
+			try
+			{
+				var builder = new ConfigurationBuilder()
+					.AddIniFile(configFile, optional: false);
 
-				IConfig mysqlConfig = confFile.Configs["Mysql"];
-				mysqlServerHostName = mysqlConfig.GetString("mysql_server_host_name");
-				mysqlServerPort = mysqlConfig.GetString("mysql_server_port", "3306");
-				mysqlUser = mysqlConfig.GetString("mysql_user");
-				mysqlPassword = mysqlConfig.GetString("mysql_password");
-				mysqlDatabase = mysqlConfig.GetString("mysql_database");
+				configuration = builder.Build();
+
+				var serviceSection = configuration.GetSection("Service");
+				serviceHostName = serviceSection["service_host_name"];
+				servicePort = serviceSection["service_port"];
+				serviceWebPort = serviceSection["service_web_port"];
+				driverServiceHostName = serviceSection["driver_service_host_name"];
+				driverServicePort = serviceSection["driver_service_port"];
+
+				var bitrixSection = configuration.GetSection("Bitrix");
+				baseAddress = bitrixSection["base_address"];
+
+				var mysqlSection = configuration.GetSection("Mysql");
+				mysqlServerHostName = mysqlSection["mysql_server_host_name"];
+				mysqlServerPort = mysqlSection["mysql_server_port"];
+				mysqlUser = mysqlSection["mysql_user"];
+				mysqlPassword = mysqlSection["mysql_password"];
+				mysqlDatabase = mysqlSection["mysql_database"];
 			}
 			catch(Exception ex) {
 				logger.Fatal(ex, "Ошибка чтения конфигурационного файла.");
@@ -97,7 +102,6 @@ namespace VodovozSmsPaymentService
 						System.Reflection.Assembly.GetAssembly (typeof(QS.Project.Domain.UserBase))
 					});
 
-				MainSupport.LoadBaseParameters();
 				QS.HistoryLog.HistoryMain.Enable();
 
 				ChannelFactory<IAndroidDriverService> channelFactory = new ChannelFactory<IAndroidDriverService>(
@@ -105,6 +109,7 @@ namespace VodovozSmsPaymentService
 					$"http://{driverServiceHostName}:{driverServicePort}/AndroidDriverService"
 				);
 				IDriverPaymentService driverPaymentService = new DriverPaymentService(channelFactory);
+				ISmsPaymentStatusNotificationReciever smsPaymentStatusNotificationReciever = new DriverAPIHelper(configuration);
 				var paymentSender = new BitrixPaymentController(baseAddress);
 				
 				var smsPaymentFileCache = new SmsPaymentFileCache("/tmp/VodovozSmsPaymentServiceTemp.txt");
@@ -112,8 +117,10 @@ namespace VodovozSmsPaymentService
 				SmsPaymentServiceInstanceProvider smsPaymentServiceInstanceProvider = new SmsPaymentServiceInstanceProvider(
 					paymentSender, 
 					driverPaymentService,
-					new OrderParametersProvider(ParametersProvider.Instance),
-					smsPaymentFileCache
+					smsPaymentStatusNotificationReciever,
+					new OrderParametersProvider(new ParametersProvider()),
+					smsPaymentFileCache,
+					new SmsPaymentDTOFactory(new OrderOrganizationProviderFactory().CreateOrderOrganizationProvider())
 				);
 
 				ServiceHost smsPaymentServiceHost = new SmsPaymentServiceHost(smsPaymentServiceInstanceProvider);
@@ -144,11 +151,19 @@ namespace VodovozSmsPaymentService
 				unsavedPaymentsWorker.Start();
 				overduePaymentsWorker.Start();
 
-				UnixSignal[] signals = {
-					new UnixSignal (Signum.SIGINT),
-					new UnixSignal (Signum.SIGHUP),
-					new UnixSignal (Signum.SIGTERM)};
-				UnixSignal.WaitAny(signals);
+				if (Environment.OSVersion.Platform == PlatformID.Unix)
+				{
+					UnixSignal[] signals = {
+						new UnixSignal (Signum.SIGINT),
+						new UnixSignal (Signum.SIGHUP),
+						new UnixSignal (Signum.SIGTERM)
+					};
+					UnixSignal.WaitAny(signals);
+				}
+				else
+				{
+					Console.ReadLine();
+				}
 			}
 			catch(Exception e) {
 				logger.Fatal(e);

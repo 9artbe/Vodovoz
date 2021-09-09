@@ -1,12 +1,10 @@
 ﻿using System;
 using Gamma.ColumnConfig;
-using QS.DomainModel.UoW;
-using QS.Project.Journal.EntitySelector;
-using QS.Project.Services;
+using QS.Print;
 using QS.Views.GtkUI;
-using QSReport;
 using Vodovoz.Domain.Documents;
 using Vodovoz.ViewModels.Accounting;
+
 namespace Vodovoz.Views.Accounting
 {
     [System.ComponentModel.ToolboxItem(true)]
@@ -26,10 +24,7 @@ namespace Vodovoz.Views.Accounting
             dateRangeFilter.Binding.AddBinding(ViewModel, vm => vm.StartDate, w => w.StartDateOrNull).InitializeFromSource();
             dateRangeFilter.Binding.AddBinding(ViewModel, vm=> vm.EndDate, w => w.EndDateOrNull).InitializeFromSource();
 
-            entryMechanic.SetEntityAutocompleteSelectorFactory(
-                ViewModel.EntityAutocompleteSelectorFactory
-            );
-
+            entryMechanic.SetEntityAutocompleteSelectorFactory(ViewModel.EntityAutocompleteSelectorFactory);
             entryMechanic.Binding.AddBinding(ViewModel, vm => vm.Mechanic, w => w.Subject);
 
             yPrintBtn.Clicked += (sender, e) => ViewModel.PrintCommand.Execute();

@@ -140,7 +140,24 @@ namespace Vodovoz.Domain.Employees
 			set { SetField(ref phones, value, () => Phones); }
 		}
 
-		Nationality nationality;
+        EmployeePost post;
+
+        [Display(Name = "Должность")]
+        public virtual EmployeePost Post
+        {
+            get => post;
+            set => SetField(ref post, value);
+        }
+
+        int? skilllevel;
+        [Display(Name = "Уровень квалификации")]
+        public virtual int? SkillLevel
+        {
+            get => skilllevel;
+            set => SetField(ref skilllevel, value);
+        }
+
+        Nationality nationality;
 
 		[Display(Name = "Национальность")]
 		public virtual Nationality Nationality {
@@ -204,28 +221,22 @@ namespace Vodovoz.Domain.Employees
 			return mainDocuments;
 		}
 
-		#region IValidatableObject implementation
+        public virtual List<int> GetSkillLevels() => new List<int> { 0, 1, 2, 3, 4, 5 };
 
-		public virtual IEnumerable<ValidationResult> Validate(ValidationContext validationContext)
+        #region IValidatableObject implementation
+
+        public virtual IEnumerable<ValidationResult> Validate(ValidationContext validationContext)
 		{
 			if(String.IsNullOrEmpty(LastName))
 				yield return new ValidationResult("Фамилия должна быть заполнена", new[] { "LastName" });
 
-			var employees = UoW.Session.QueryOver<Employee>()
-				.Where(e => e.Name == this.Name && e.LastName == this.LastName && e.Patronymic == this.Patronymic)
-				.WhereNot(e => e.Id == this.Id)
+			var personnels = UoW.Session.QueryOver<Personnel>()
+				.Where(p => p.Name == this.Name && p.LastName == this.LastName && p.Patronymic == this.Patronymic)
+				.WhereNot(p => p.Id == this.Id)
 				.List();
 
-			if(employees.Count > 0)
+			if(personnels.Count > 0)
 				yield return new ValidationResult("Сотрудник уже существует", new[] { "Duplication" });
-
-			List<EmployeeDocument> mainDocuments = GetMainDocuments();
-			if(mainDocuments.Count <= 0)
-				yield return new ValidationResult(String.Format("У сотрудника должен присутствовать главный документ"),
-							new[] { this.GetPropertyName(x => x.Documents) });
-			if(mainDocuments.Count > 1)
-				yield return new ValidationResult(String.Format("Сотрудник может иметь только один главный документ"),
-							new[] { this.GetPropertyName(x => x.Documents) });
 		}
 
 		#endregion
@@ -307,7 +318,9 @@ namespace Vodovoz.Domain.Employees
 		string AddressCurrent { get; set; }
 		string INN { get; set; }
 		IList<Phone> Phones { get; set; }
-		IList<EmployeeDocument> Documents { get; set; }
+        EmployeePost Post { get; set; }
+        int? SkillLevel { get; set; }
+        IList<EmployeeDocument> Documents { get; set; }
 		Nationality Nationality { get; set; }
 		bool IsRussianCitizen { get; set; }
 		Citizenship Citizenship { get; set; }

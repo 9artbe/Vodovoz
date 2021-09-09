@@ -4,8 +4,7 @@ using System.Threading;
 using Gtk;
 using QS.Dialog;
 using QS.Project.Domain;
-using QS.Project.VersionControl;
-using QS.ErrorReporting;
+using QS.Project.Versioning;
 using Vodovoz.Views;
 using Vodovoz.Tools;
 using QS.Services;
@@ -47,7 +46,6 @@ namespace Vodovoz.Infrastructure
 
 		public Thread GuiThread { get; set; }
 		public IApplicationInfo ApplicationInfo { get; set; }
-		public IDataBaseInfo DataBaseInfo { get; set; }
 		public IInteractiveService InteractiveService { get; set; }
 		public IErrorMessageModelFactory ErrorMessageModelFactory { get; set; }
 		public UserBase User { get; set; }
@@ -85,8 +83,14 @@ namespace Vodovoz.Infrastructure
 		{
 			if(InteractiveService != null) {
 				foreach(var handler in CustomErrorHandlers) {
-					if(handler(exception, ApplicationInfo, User, InteractiveService))
-						return;
+					try {
+						if(handler(exception, ApplicationInfo, User, InteractiveService)) {
+							return;
+						}
+					}
+					catch(Exception ex) {
+						logger.Error(ex, "Ошибка в CustomErrorHandler");
+					}
 				}
 			}
 			if(errorMessageViewModel != null) {

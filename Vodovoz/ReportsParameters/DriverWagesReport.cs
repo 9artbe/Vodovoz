@@ -1,14 +1,12 @@
 ﻿using System;
 using System.Collections.Generic;
 using QS.DomainModel.UoW;
-using QS.Dialog;
 using QS.Report;
-using QSProjectsLib;
 using QSReport;
 using Vodovoz.Domain.Employees;
 using Vodovoz.ViewModel;
-using Vodovoz.Filters.ViewModels;
 using QS.Dialog.GtkUI;
+using Vodovoz.JournalFilters;
 
 namespace Vodovoz.Reports
 {
@@ -19,12 +17,23 @@ namespace Vodovoz.Reports
 		{
 			this.Build();
 			UoW = UnitOfWorkFactory.CreateWithoutRoot ();
-			var filter = new EmployeeFilterViewModel();
+			var filter = new EmployeeRepresentationFilterViewModel();
 			filter.SetAndRefilterAtOnce(
 				x => x.RestrictCategory = EmployeeCategory.driver,
 				x => x.Status = EmployeeStatus.IsWorking
 			);
 			yentryreferenceDriver.RepresentationModel = new EmployeesVM(filter);
+			yentryreferenceDriver.Changed += (sender, args) =>
+			{
+				if(dateperiodpicker.StartDateOrNull.HasValue && yentryreferenceDriver.Subject is Employee)
+					OnUpdate(true);
+			};
+			
+			dateperiodpicker.PeriodChanged += (sender, args) =>
+			{
+				if(yentryreferenceDriver.Subject is Employee && dateperiodpicker.StartDateOrNull.HasValue)
+					OnUpdate(true);
+			};
 		}
 
 		#region IParametersWidget implementation

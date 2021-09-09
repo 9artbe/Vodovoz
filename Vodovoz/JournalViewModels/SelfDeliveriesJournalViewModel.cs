@@ -9,7 +9,6 @@ using NHibernate.SqlCommand;
 using NHibernate.Transform;
 using QS.Dialog.Gtk;
 using QS.Dialog.GtkUI;
-using QS.DomainModel.Config;
 using QS.DomainModel.UoW;
 using QS.Permissions;
 using QS.Project.Domain;
@@ -24,8 +23,9 @@ using Vodovoz.Domain.Goods;
 using Vodovoz.Domain.Orders;
 using Vodovoz.EntityRepositories.Cash;
 using Vodovoz.Filters.ViewModels;
+using Vodovoz.Infrastructure.Services;
 using Vodovoz.JournalNodes;
-using Vodovoz.Journals.JournalViewModels;
+using Vodovoz.Parameters;
 using Vodovoz.Tools.CallTasks;
 using Vodovoz.ViewModels.Cash;
 using VodovozOrder = Vodovoz.Domain.Orders.Order;
@@ -34,22 +34,40 @@ namespace Vodovoz.Representations
 {
 	public class SelfDeliveriesJournalViewModel : FilterableSingleEntityJournalViewModelBase<VodovozOrder, OrderDlg, SelfDeliveryJournalNode, OrderJournalFilterViewModel>
 	{
-		public SelfDeliveriesJournalViewModel(OrderJournalFilterViewModel filterViewModel, IUnitOfWorkFactory unitOfWorkFactory, ICommonServices commonServices, CallTaskWorker callTaskWorker) 
+        private readonly CallTaskWorker _callTaskWorker;
+        private readonly Employee _currentEmployee;
+        private readonly OrderPaymentSettings _orderPaymentSettings;
+        private readonly OrderParametersProvider _orderParametersProvider;
+        private readonly bool _userCanChangePayTypeToByCard;
+
+        public SelfDeliveriesJournalViewModel(
+	        OrderJournalFilterViewModel filterViewModel, 
+            IUnitOfWorkFactory unitOfWorkFactory, 
+			ICommonServices commonServices, 
+            CallTaskWorker callTaskWorker,
+            OrderPaymentSettings orderPaymentSettings,
+			OrderParametersProvider orderParametersProvider,
+	        IEmployeeService employeeService) 
 			: base(filterViewModel, unitOfWorkFactory, commonServices)
 		{
-			this.callTaskWorker = callTaskWorker ?? throw new ArgumentNullException(nameof(callTaskWorker));
-			
-			TabName = "Журнал самовывозов";
+            _callTaskWorker = callTaskWorker ?? throw new ArgumentNullException(nameof(callTaskWorker));
+            _orderPaymentSettings = orderPaymentSettings ?? throw new ArgumentNullException(nameof(orderPaymentSettings));
+            _orderParametersProvider = orderParametersProvider ?? throw new ArgumentNullException(nameof(orderParametersProvider));
+            _currentEmployee =
+	            (employeeService ?? throw new ArgumentNullException(nameof(employeeService))).GetEmployeeForUser(
+		            UoW,
+		            commonServices.UserService.CurrentUserId);
+
+            TabName = "Журнал самовывозов";
 			SetOrder(x => x.Date, true);
 			UpdateOnChanges(
 				typeof(VodovozOrder),
 				typeof(OrderItem)
 			);
+			_userCanChangePayTypeToByCard = commonServices.CurrentPermissionService.ValidatePresetPermission("allow_load_selfdelivery");
 		}
 
-		private readonly CallTaskWorker callTaskWorker;
-
-		protected override Func<IUnitOfWork, IQueryOver<VodovozOrder>> ItemsSourceQueryFunction => (uow) => {
+        protected override Func<IUnitOfWork, IQueryOver<VodovozOrder>> ItemsSourceQueryFunction => (uow) => {
 			SelfDeliveryJournalNode resultAlias = null;
 			VodovozOrder orderAlias = null;
 			Nomenclature nomenclatureAlias = null;
@@ -76,7 +94,7 @@ namespace Vodovoz.Representations
 
 			var query = uow.Session.QueryOver<VodovozOrder>(() => orderAlias)
 								   .Where(() => orderAlias.SelfDelivery)
-								   .Where(() => !orderAlias.IsService);
+								   .Where(() => orderAlias.OrderAddressType != OrderAddressType.Service);
 
 			if(FilterViewModel.RestrictStatus != null)
 				query.Where(o => o.OrderStatus == FilterViewModel.RestrictStatus);
@@ -91,8 +109,8 @@ namespace Vodovoz.Representations
 			if(FilterViewModel.RestrictCounterparty != null)
 				query.Where(o => o.Client == FilterViewModel.RestrictCounterparty);
 
-			if(FilterViewModel.RestrictDeliveryPoint != null)
-				query.Where(o => o.DeliveryPoint == FilterViewModel.RestrictDeliveryPoint);
+			if(FilterViewModel.DeliveryPoint != null)
+				query.Where(o => o.DeliveryPoint == FilterViewModel.DeliveryPoint);
 
 			if(FilterViewModel.RestrictStartDate != null)
 				query.Where(o => o.DeliveryDate >= FilterViewModel.RestrictStartDate);
@@ -240,9 +258,10 @@ namespace Vodovoz.Representations
 					"Оплата по карте",
 					selectedItems => {
 						var selectedNodes = selectedItems.Cast<SelfDeliveryJournalNode>().ToList();
-						return selectedNodes.Count() == 1 && selectedNodes.First().PaymentTypeEnum == PaymentType.cash;
+                        var selectedNode = selectedNodes.First();
+                        return selectedNodes.Count() == 1 && selectedNode.PaymentTypeEnum == PaymentType.cash && selectedNode.StatusEnum != OrderStatus.Closed;
 					},
-					selectedItems => true,
+					selectedItems => _userCanChangePayTypeToByCard,
 					selectedItems => {
 						var selectedNodes = selectedItems.Cast<SelfDeliveryJournalNode>();
 						var selectedNode  = selectedNodes.FirstOrDefault();
@@ -250,9 +269,12 @@ namespace Vodovoz.Representations
 							TabParent.AddTab(
 								new PaymentByCardViewModel(
 									EntityUoWBuilder.ForOpen(selectedNode.Id),
-									UnitOfWorkFactory,
+                                    UnitOfWorkFactory,
 									commonServices,
-									callTaskWorker), 
+                                    _callTaskWorker,
+                                    _orderPaymentSettings,
+									_orderParametersProvider,
+									_currentEmployee), 
 								this
 							);
 					}

@@ -1,37 +1,46 @@
-﻿using System;
-using System.Data;
+using System;
+using Autofac;
 using Dialogs.Employees;
 using Gtk;
-using InstantSmsService;
+using Microsoft.Extensions.Configuration;
+using Microsoft.Extensions.Configuration.Memory;
+using Microsoft.Extensions.Primitives;
 using QS.Dialog.Gtk;
-using QS.Dialog.GtkUI;
+using QS.DomainModel.Entity.EntityPermissions.EntityExtendedPermission;
 using QS.DomainModel.UoW;
-using QS.Project.DB;
-using QS.Project.Dialogs;
+using QS.Navigation;
 using QS.Project.Dialogs.GtkUI;
-using QS.Project.Dialogs.GtkUI.ServiceDlg;
 using QS.Project.Domain;
+using QS.Project.Journal;
 using QS.Project.Journal.EntitySelector;
 using QS.Project.Services;
+using System;
+using System.Collections.Generic;
 using Vodovoz;
 using Vodovoz.Core.DataService;
 using Vodovoz.Core.Journal;
 using Vodovoz.Dialogs.Logistic;
 using Vodovoz.Dialogs.OrderWidgets;
 using Vodovoz.Dialogs.Sale;
+using Vodovoz.Domain.Client;
 using Vodovoz.Domain.Employees;
 using Vodovoz.Domain.Goods;
 using Vodovoz.Domain.Orders;
 using Vodovoz.Domain.Suppliers;
+using Vodovoz.EntityRepositories;
+using Vodovoz.EntityRepositories.CallTasks;
 using Vodovoz.EntityRepositories.Employees;
 using Vodovoz.EntityRepositories.Fuel;
+using Vodovoz.EntityRepositories.Goods;
 using Vodovoz.EntityRepositories.Logistic;
 using Vodovoz.EntityRepositories.Operations;
 using Vodovoz.EntityRepositories.Orders;
+using Vodovoz.EntityRepositories.Store;
 using Vodovoz.EntityRepositories.Subdivisions;
 using Vodovoz.EntityRepositories.Suppliers;
 using Vodovoz.Filters.ViewModels;
 using Vodovoz.FilterViewModels.Goods;
+using Vodovoz.FilterViewModels.Organization;
 using Vodovoz.FilterViewModels.Suppliers;
 using Vodovoz.JournalViewers;
 using Vodovoz.JournalViewModels.Suppliers;
@@ -42,33 +51,60 @@ using Vodovoz.ViewModels.Logistic;
 using Vodovoz.ViewModels.Suppliers;
 using Vodovoz.EntityRepositories.Store;
 using QS.Project.Journal;
-using QS.Project.Repositories;
-using QS.Project.Services.GtkUI;
-using Vodovoz.Additions;
+using QS.Services;
 using Vodovoz.Domain.Client;
 using Vodovoz.Infrastructure;
 using Vodovoz.ViewModels;
 using Vodovoz.EntityRepositories.Goods;
 using Vodovoz.EntityRepositories.CallTasks;
 using Vodovoz.EntityRepositories;
+using Vodovoz.EntityRepositories.Cash;
+using Vodovoz.EntityRepositories.Chats;
+using Vodovoz.EntityRepositories.Counterparties;
+using Vodovoz.EntityRepositories.Payments;
+using Vodovoz.EntityRepositories.Sale;
+using Vodovoz.EntityRepositories.Stock;
+using Vodovoz.EntityRepositories.Undeliveries;
+using Vodovoz.FilterViewModels.Organization;
 using Vodovoz.Infrastructure.Services;
+using Vodovoz.JournalFilters.Cash;
 using Vodovoz.Journals.FilterViewModels;
 using Vodovoz.Journals.JournalViewModels;
+using Vodovoz.Journals.JournalViewModels.Organization;
 using Vodovoz.JournalSelector;
+using Vodovoz.JournalViewers;
 using Vodovoz.JournalViewModels;
-using Vodovoz.Models;
+using Vodovoz.JournalViewModels.Suppliers;
+using Vodovoz.Old1612ExportTo1c;
 using Vodovoz.Parameters;
+using Vodovoz.PermissionExtensions;
+using Vodovoz.Representations;
+using Vodovoz.ServiceDialogs;
 using Vodovoz.TempAdapters;
 using Vodovoz.Tools;
 using Vodovoz.Tools.CallTasks;
+using Vodovoz.ViewModel;
+using Vodovoz.ViewModels;
 using Vodovoz.ViewModels.Journals.FilterViewModels;
+using Vodovoz.ViewModels.Journals.FilterViewModels.Employees;
+using Vodovoz.ViewModels.Journals.FilterViewModels.Logistic;
+using Vodovoz.ViewModels.Journals.JournalViewModels.Employees;
+using Vodovoz.Journals.JournalViewModels.Organization;
+using Vodovoz.ViewModels.Journals.FilterViewModels.Cash;
+using Vodovoz.ViewModels.Journals.FilterViewModels.Orders;
+using Vodovoz.ViewModels.Journals.JournalFactories;
 using Vodovoz.ViewModels.Journals.JournalViewModels.Cash;
+using Vodovoz.ViewModels.Journals.JournalViewModels.Employees;
+using Vodovoz.ViewModels.Journals.JournalViewModels.Logistic;
+using Vodovoz.ViewModels.Journals.JournalViewModels.Orders;
+using Vodovoz.ViewModels.TempAdapters;
+using Vodovoz.ViewModels.Logistic;
+using Vodovoz.ViewModels.Suppliers;
+using Vodovoz.ViewModels.ViewModels.Suppliers;
 using Vodovoz.ViewWidgets;
+using VodovozInfrastructure.Endpoints;
 using VodovozInfrastructure.Interfaces;
 using Action = Gtk.Action;
-using Vodovoz.Old1612ExportTo1c;
-using Vodovoz.JournalFilters.Cash;
-using Vodovoz.ViewModels.Journals.FilterViewModels.Logistic;
 
 public partial class MainWindow : Window
 {
@@ -100,11 +136,6 @@ public partial class MainWindow : Window
 
 	Action ActionReadyForShipment;
 	Action ActionReadyForReception;
-	Action ActionCashDocuments;
-	Action ActionAccountableDebt;
-	Action ActionUnclosedAdvances;
-	Action ActionCashFlow;
-	Action ActionSelfdeliveryOrders;
 	Action ActionFinesJournal;
 	Action ActionPremiumJournal;
 	Action ActionCarProxiesJournal;
@@ -126,12 +157,25 @@ public partial class MainWindow : Window
 	Action ActionRouteListAddressesTransferring;
 	Action ActionTransferOperationJournal;
 	Action ActionDistricts;
+
+	//Касса
+	Action ActionCashDocuments;
+	Action ActionAccountableDebt;
+	Action ActionUnclosedAdvances;
+	Action ActionCashFlow;
+	Action ActionSelfdeliveryOrders;
 	Action ActionCashTransferDocuments;
 	Action ActionFuelTransferDocuments;
+	Action ActionOrganizationCashTransferDocuments;
+	Action ActionSalariesJournal;
 
 	//Suppliers
 	Action ActionNewRequestToSupplier;
 	Action ActionJournalOfRequestsToSuppliers;
+	Action ActionWarehousesBalanceSummary;
+
+	//ТрО
+	private Action ActionCarEventsJournal;
 
 	public void BuildToolbarActions()
 	{
@@ -177,6 +221,8 @@ public partial class MainWindow : Window
 		ActionSelfdeliveryOrders = new Action("ActionSelfdeliveryOrders", "Журнал самовывозов", null, "table");
 		ActionCashTransferDocuments = new Action("ActionCashTransferDocuments", "Журнал перемещения д/с", null, "table");
 		ActionFuelTransferDocuments = new Action("ActionFuelTransferDocuments", "Журнал учета топлива", null, "table");
+		ActionOrganizationCashTransferDocuments = new Action("ActionOrganizationCashTransferDocuments", "Журнал перемещения д/с для юр.лиц", null, "table");
+		ActionSalariesJournal = new Action(nameof(ActionSalariesJournal), "Журнал выдач З/П", null, "table");
 
 		//Бухгалтерия
 		ActionTransferBankDocs = new Action("ActionTransferBankDocs", "Загрузка из банк-клиента", null, "table");
@@ -207,6 +253,10 @@ public partial class MainWindow : Window
 		ActionNewRequestToSupplier = new Action(nameof(ActionNewRequestToSupplier), "Новая заявка поставщику", null, "table");
 		ActionJournalOfRequestsToSuppliers = new Action(nameof(ActionJournalOfRequestsToSuppliers), "Журнал заявок поставщику", null, "table");
 		ActionExportImportNomenclatureCatalog = new Action("ActionExportImportNomenclatureCatalog", "Выгрузка/Загрузка каталога номенклатур", null, "table");
+		ActionWarehousesBalanceSummary = new Action(nameof(ActionWarehousesBalanceSummary), "Остатки по складам", null, "table");
+
+		//ТрО
+		ActionCarEventsJournal = new Action("ActionCarEventsJournal", "Журнал событий ТС", null, "table");
 
 		#endregion
 		#region Inserting actions to the toolbar
@@ -241,13 +291,6 @@ public partial class MainWindow : Window
 		w1.Add(ActionRouteListTracking, null);
 		w1.Add(ActionRouteListMileageCheck, null);
 
-		w1.Add(ActionCashDocuments, null);
-		w1.Add(ActionAccountableDebt, null);
-		w1.Add(ActionUnclosedAdvances, null);
-		w1.Add(ActionCashFlow, null);
-		w1.Add(ActionSelfdeliveryOrders, null);
-		w1.Add(ActionCashTransferDocuments, null);
-		w1.Add(ActionFuelTransferDocuments, null);
 		w1.Add(ActionFinesJournal, null);
 		w1.Add(ActionPremiumJournal, null);
 		w1.Add(ActionCarProxiesJournal, null);
@@ -269,10 +312,33 @@ public partial class MainWindow : Window
 		w1.Add(ActionTransferOperationJournal, null);
 		w1.Add(ActionDistricts, null);
 
+		//Касса
+		w1.Add(ActionCashDocuments, null);
+		w1.Add(ActionAccountableDebt, null);
+		w1.Add(ActionUnclosedAdvances, null);
+		w1.Add(ActionCashFlow, null);
+		w1.Add(ActionSelfdeliveryOrders, null);
+		w1.Add(ActionCashTransferDocuments, null);
+		w1.Add(ActionFuelTransferDocuments, null);
+		w1.Add(ActionOrganizationCashTransferDocuments, null);
+		w1.Add(ActionSalariesJournal, null);
+
 		//Suppliers
 		w1.Add(ActionNewRequestToSupplier, null);
 		w1.Add(ActionJournalOfRequestsToSuppliers, null);
 		w1.Add(ActionExportImportNomenclatureCatalog, null);
+		w1.Add(ActionWarehousesBalanceSummary, null);
+
+		//ТрО
+		w1.Add(ActionCarEventsJournal, null);
+		w1.Add(ActionCarProxiesJournal, null);
+		w1.Add(ActionRouteListMileageCheck, null);
+		w1.Add(ActionWayBillReport, null);
+		w1.Add(ActionFinesJournal, null);
+		w1.Add(ActionWarehouseDocuments, null);
+		w1.Add(ActionWarehouseStock, null);
+		w1.Add(ActionCar, null);
+
 		UIManager.InsertActionGroup(w1, 0);
 		#endregion
 		#region Creating events
@@ -304,13 +370,6 @@ public partial class MainWindow : Window
 		ActionRouteListMileageCheck.Activated += ActionRouteListDistanceValidation_Activated;
 		ActionRouteListTracking.Activated += ActionRouteListTracking_Activated;
 
-		ActionCashDocuments.Activated += ActionCashDocuments_Activated;
-		ActionAccountableDebt.Activated += ActionAccountableDebt_Activated;
-		ActionUnclosedAdvances.Activated += ActionUnclosedAdvances_Activated;
-		ActionCashFlow.Activated += ActionCashFlow_Activated;
-		ActionSelfdeliveryOrders.Activated += ActionSelfdeliveryOrders_Activated;
-		ActionCashTransferDocuments.Activated += ActionCashTransferDocuments_Activated;
-		ActionFuelTransferDocuments.Activated += ActionFuelTransferDocuments_Activated;
 		ActionFinesJournal.Activated += ActionFinesJournal_Activated;
 		ActionPremiumJournal.Activated += ActionPremiumJournal_Activated;
 		ActionCarProxiesJournal.Activated += ActionCarProxiesJournal_Activated;
@@ -332,25 +391,54 @@ public partial class MainWindow : Window
 		ActionTransferOperationJournal.Activated += ActionTransferOperationJournal_Activated;
 		ActionDistricts.Activated += ActionDistrictsActivated;
 
+		//Касса
+		ActionCashDocuments.Activated += ActionCashDocuments_Activated;
+		ActionAccountableDebt.Activated += ActionAccountableDebt_Activated;
+		ActionUnclosedAdvances.Activated += ActionUnclosedAdvances_Activated;
+		ActionCashFlow.Activated += ActionCashFlow_Activated;
+		ActionSelfdeliveryOrders.Activated += ActionSelfdeliveryOrders_Activated;
+		ActionCashTransferDocuments.Activated += ActionCashTransferDocuments_Activated;
+		ActionFuelTransferDocuments.Activated += ActionFuelTransferDocuments_Activated;
+		ActionOrganizationCashTransferDocuments.Activated += ActionOrganizationCashTransferDocuments_Activated;
+		ActionSalariesJournal.Activated += ActionSalariesJournal_Activated;
+
 		//Suppliers
 		ActionNewRequestToSupplier.Activated += ActionNewRequestToSupplier_Activated;
 		ActionJournalOfRequestsToSuppliers.Activated += ActionJournalOfRequestsToSuppliers_Activated;
 		ActionExportImportNomenclatureCatalog.Activated += ActionExportImportNomenclatureCatalog_Activated;
+		ActionWarehousesBalanceSummary.Activated += ActionWarehousesBalanceSummary_Activated;
 
+		//ТрО
+		ActionCarEventsJournal.Activated += ActionCarEventsJournalActivated;
+		
 		#endregion
 	}
 
+	private void ActionSalariesJournal_Activated(object sender, EventArgs e)
+	{
+		var subdivisionRepository = autofacScope.Resolve<ISubdivisionRepository>();
+		var filter = new SalaryByEmployeeJournalFilterViewModel(subdivisionRepository, EmployeeStatus.IsWorking);
+
+		var page = NavigationManager.OpenViewModel<SalaryByEmployeeJournalViewModel, SalaryByEmployeeJournalFilterViewModel>(null, filter);
+		page.ViewModel.SelectionMode = JournalSelectionMode.Single;
+	}
+
+	private void ActionWarehousesBalanceSummary_Activated(object sender, EventArgs e)
+	{
+		NavigationManager.OpenViewModel<WarehousesBalanceSummaryViewModel>(null);
+	}
+
 	void ActionNewRequestToSupplier_Activated(object sender, System.EventArgs e) {
-		var nomenclatureRepository = new NomenclatureRepository(new NomenclatureParametersProvider());
-		
+		var nomenclatureRepository = new NomenclatureRepository(new NomenclatureParametersProvider(new ParametersProvider()));
+		var userRepository = new UserRepository();
+
 		IEntityAutocompleteSelectorFactory counterpartySelectorFactory =
 			new DefaultEntityAutocompleteSelectorFactory<Counterparty, CounterpartyJournalViewModel,
 				CounterpartyJournalFilterViewModel>(ServicesConfig.CommonServices);
 		
 		IEntityAutocompleteSelectorFactory nomenclatureSelectorFactory =
 			new NomenclatureAutoCompleteSelectorFactory<Nomenclature,NomenclaturesJournalViewModel>(ServicesConfig.CommonServices,
-				new NomenclatureFilterViewModel(), counterpartySelectorFactory, nomenclatureRepository,
-				UserSingletonRepository.GetInstance());
+				new NomenclatureFilterViewModel(), counterpartySelectorFactory, nomenclatureRepository, userRepository);
 		
 		tdiMain.OpenTab(
 			DialogHelper.GenerateDialogHashName<RequestToSupplier>(0),
@@ -363,22 +451,22 @@ public partial class MainWindow : Window
 				counterpartySelectorFactory,
 				nomenclatureSelectorFactory,
 				nomenclatureRepository,
-				UserSingletonRepository.GetInstance()
+				userRepository
 			)
 		);
 	}
 
 	void ActionJournalOfRequestsToSuppliers_Activated(object sender, System.EventArgs e) {
-		var nomenclatureRepository = new NomenclatureRepository(new NomenclatureParametersProvider());
-		
+		var nomenclatureRepository = new NomenclatureRepository(new NomenclatureParametersProvider(new ParametersProvider()));
+		var userRepository = new UserRepository();
+
 		IEntityAutocompleteSelectorFactory counterpartySelectorFactory =
 			new DefaultEntityAutocompleteSelectorFactory<Counterparty, CounterpartyJournalViewModel,
 				CounterpartyJournalFilterViewModel>(ServicesConfig.CommonServices);
 
 		IEntityAutocompleteSelectorFactory nomenclatureSelectorFactory =
 			new NomenclatureAutoCompleteSelectorFactory<Nomenclature,NomenclaturesJournalViewModel>(ServicesConfig.CommonServices,
-				new NomenclatureFilterViewModel(), counterpartySelectorFactory, nomenclatureRepository,
-				UserSingletonRepository.GetInstance());
+				new NomenclatureFilterViewModel(), counterpartySelectorFactory, nomenclatureRepository, userRepository);
 		
 		RequestsToSuppliersFilterViewModel filter = new RequestsToSuppliersFilterViewModel(nomenclatureSelectorFactory);
 
@@ -391,7 +479,7 @@ public partial class MainWindow : Window
 			counterpartySelectorFactory,
 			nomenclatureSelectorFactory,
 			nomenclatureRepository,
-			UserSingletonRepository.GetInstance()
+			userRepository
 		);
 		tdiMain.AddTab(requestsJournal);
 	}
@@ -406,48 +494,43 @@ public partial class MainWindow : Window
 
 	void ActionCallTasks_Activate(object sender, System.EventArgs e)
 	{
-
 		tdiMain.OpenTab(
 			"CRM",
-			() => new TasksView(EmployeeSingletonRepository.GetInstance(), 
+			() => new TasksView(new EmployeeRepository(), 
 								new BottlesRepository(),
 								new CallTaskRepository(),
-								new PhoneRepository()), null
+								new PhoneRepository(),
+								new EmployeeJournalFactory(),
+								new DeliveryPointRepository()), null
 		);
-
-		/*
-		tdiMain.OpenTab(
-			"CRM",
-			() => new BusinessTasksJournalViewModel(new CallTaskFilterViewModel(),
-													new BusinessTasksJournalFooterViewModel(),
-													UnitOfWorkFactory.GetDefaultFactory,
-													ServicesConfig.CommonServices,
-													EmployeeSingletonRepository.GetInstance(),
-													new BottlesRepository(),
-													new CallTaskRepository(),
-													new PhoneRepository()) { SelectionMode = JournalSelectionMode.Multiple}, null
-		);
-	*/
 	}
 
 	void ActionBottleDebtors_Activate(object sender, System.EventArgs e)
 	{
 		DebtorsJournalFilterViewModel filter = new DebtorsJournalFilterViewModel();
-		var debtorsJournal = new DebtorsJournalViewModel(filter, UnitOfWorkFactory.GetDefaultFactory, ServicesConfig.CommonServices, EmployeeSingletonRepository.GetInstance());
+		var debtorsJournal = new DebtorsJournalViewModel(
+			filter, UnitOfWorkFactory.GetDefaultFactory, ServicesConfig.CommonServices, new EmployeeRepository());
 
 		tdiMain.AddTab(debtorsJournal);
-
 	}
 
-	void ActionRouteListAddressesTransferring_Activated(object sender, System.EventArgs e) {
+	void ActionRouteListAddressesTransferring_Activated(object sender, System.EventArgs e)
+	{
+		var parametersProvider = new ParametersProvider();
 		var employeeNomenclatureMovementRepository = new EmployeeNomenclatureMovementRepository();
-		var terminalNomenclatureProvider = new BaseParametersProvider();
+		var terminalNomenclatureProvider = new BaseParametersProvider(parametersProvider);
+		var routeListRepository = new RouteListRepository(new StockRepository(), new BaseParametersProvider(parametersProvider));
+		var employeeService = new EmployeeService();
 		
 		tdiMain.OpenTab(
 			TdiTabBase.GenerateHashName<RouteListAddressesTransferringDlg>(),
 			() => new RouteListAddressesTransferringDlg(
 				employeeNomenclatureMovementRepository,
-				terminalNomenclatureProvider
+				terminalNomenclatureProvider,
+				routeListRepository,
+				employeeService,
+				ServicesConfig.CommonServices,
+				new CategoryRepository(parametersProvider)
 			)
 		);
 	}
@@ -472,7 +555,7 @@ public partial class MainWindow : Window
 	{
 		tdiMain.OpenTab(
 			QSReport.ReportViewDlg.GenerateHashName<Vodovoz.Reports.RevisionBottlesAndDeposits>(),
-			() => new QSReport.ReportViewDlg(new Vodovoz.Reports.RevisionBottlesAndDeposits())
+			() => new QSReport.ReportViewDlg(new Vodovoz.Reports.RevisionBottlesAndDeposits(new OrderRepository()))
 		);
 	}
 
@@ -486,7 +569,8 @@ public partial class MainWindow : Window
 
 	void ActionExportImportNomenclatureCatalog_Activated(object sender, System.EventArgs e)
 	{
-		INomenclatureRepository nomenclatureRepository = new NomenclatureRepository(new NomenclatureParametersProvider());
+		INomenclatureRepository nomenclatureRepository =
+			new NomenclatureRepository(new NomenclatureParametersProvider(new ParametersProvider()));
 
 		tdiMain.OpenTab(
 			"ExportImportNomenclatureCatalog",
@@ -499,17 +583,34 @@ public partial class MainWindow : Window
 		);
 	}
 
-	void ActionAtWorks_Activated(object sender, System.EventArgs e)
+	void ActionAtWorks_Activated(object sender, EventArgs e)
 	{
+		var employeeJournalFactory = new EmployeeJournalFactory();
+
+		var cs = new ConfigurationSection(new ConfigurationRoot(new List<IConfigurationProvider> { new MemoryConfigurationProvider(new MemoryConfigurationSource()) }), "");
+
+		cs["BaseUri"] = "https://driverapi.vod.qsolution.ru:7090/api/";
+
+		var apiHelper = new ApiClientProvider.ApiClientProvider(cs);
+
+		var driverApiRegisterEndpoint = new DriverApiUserRegisterEndpoint(apiHelper);
+
 		tdiMain.OpenTab(
 			TdiTabBase.GenerateHashName<AtWorksDlg>(),
-			() => new AtWorksDlg(new BaseParametersProvider())
+			() => new AtWorksDlg(
+				new BaseParametersProvider(new ParametersProvider()),
+				employeeJournalFactory,
+				driverApiRegisterEndpoint
+				)
 		);
 	}
 
 	void ActionRouteListsAtDay_Activated(object sender, System.EventArgs e)
 	{
-		if(new BaseParametersProvider().UseOldAutorouting())
+		var parametersProvider = new ParametersProvider();
+		var baseParametersProvider = new BaseParametersProvider(parametersProvider);
+		
+		if(new BaseParametersProvider(parametersProvider).UseOldAutorouting())
 			tdiMain.OpenTab(
 				TdiTabBase.GenerateHashName<RoutesAtDayDlg>(),
 				() => new RoutesAtDayDlg()
@@ -519,16 +620,19 @@ public partial class MainWindow : Window
 				"AutoRouting",
 				() => new RouteListsOnDayViewModel(
 					ServicesConfig.CommonServices,
-					new DeliveryScheduleParametersProvider(ParametersProvider.Instance),
+					new DeliveryScheduleParametersProvider(parametersProvider),
 					new GtkTabsOpener(),
-					new RouteListRepository(),
-					new SubdivisionRepository(),
-					OrderSingletonRepository.GetInstance(),
+					new RouteListRepository(new StockRepository(), baseParametersProvider),
+					new SubdivisionRepository(parametersProvider),
+					new OrderRepository(),
 					new AtWorkRepository(),
 					new CarRepository(),
 					NavigationManagerProvider.NavigationManager,
-					UserSingletonRepository.GetInstance(),
-					new BaseParametersProvider()
+					new UserRepository(),
+					baseParametersProvider,
+					new EmployeeJournalFactory(),
+					new GeographicGroupRepository(),
+					new ScheduleRestrictionRepository()
 				)
 			);
 	}
@@ -560,15 +664,18 @@ public partial class MainWindow : Window
 	void ActionPaymentFromBank_Activated(object sender, System.EventArgs e)
 	{
 		var filter = new PaymentsJournalFilterViewModel();
+		var paymentsRepository = new PaymentsRepository();
+		var parametersProvider = new ParametersProvider();
 
 		var paymentsJournalViewModel = new PaymentsJournalViewModel(
 			filter,
 			UnitOfWorkFactory.GetDefaultFactory,
 			ServicesConfig.CommonServices,
 			NavigationManagerProvider.NavigationManager,
-			OrderSingletonRepository.GetInstance(),
-			new OrganizationParametersProvider(ParametersProvider.Instance),
-			new BaseParametersProvider()
+			new OrderRepository(),
+			new OrganizationParametersProvider(parametersProvider),
+			new BaseParametersProvider(parametersProvider),
+			paymentsRepository
 		);
 
 		tdiMain.AddTab(paymentsJournalViewModel);
@@ -594,22 +701,31 @@ public partial class MainWindow : Window
 
 	void ActionCashFlow_Activated(object sender, System.EventArgs e)
 	{
+		var parametersProvider = new ParametersProvider();
+
 		tdiMain.OpenTab(
 			QSReport.ReportViewDlg.GenerateHashName<Vodovoz.Reports.CashFlow>(),
-			() => new QSReport.ReportViewDlg(new Vodovoz.Reports.CashFlow(new SubdivisionRepository(), ServicesConfig.CommonServices))
+			() => new QSReport.ReportViewDlg(new Vodovoz.Reports.CashFlow(
+				new SubdivisionRepository(parametersProvider), ServicesConfig.CommonServices, new CategoryRepository(parametersProvider)))
 		);
 	}
 
 	void ActionSelfdeliveryOrders_Activated(object sender, System.EventArgs e)
 	{
-		OrderJournalFilterViewModel filter = new OrderJournalFilterViewModel();
+		var counterpartyJournalFactory = new CounterpartyJournalFactory();
+		var deliveryPointJournalFactory = new DeliveryPointJournalFactory();
+		var parametersProvider = new ParametersProvider();
+
+		var filter = new OrderJournalFilterViewModel(counterpartyJournalFactory, deliveryPointJournalFactory);
+
 		filter.SetAndRefilterAtOnce(
-			x => x.AllowStatuses = new OrderStatus[] { OrderStatus.WaitForPayment, OrderStatus.OnLoading, OrderStatus.Accepted, OrderStatus.Closed },
+			x => x.AllowStatuses = new [] { OrderStatus.WaitForPayment, OrderStatus.OnLoading, OrderStatus.Accepted, OrderStatus.Closed },
 			x => x.RestrictOnlySelfDelivery = true,
 			x => x.RestrictWithoutSelfDelivery = false,
 			x => x.RestrictHideService = true,
 			x => x.RestrictOnlyService = false,
-			x => x.RestrictLessThreeHours = false
+			x => x.RestrictLessThreeHours = false,
+			x => x.SortDeliveryDate = false
 		);
 		filter.HidenByDefault = true;
 		var selfDeliveriesJournal = new SelfDeliveriesJournalViewModel(
@@ -618,22 +734,32 @@ public partial class MainWindow : Window
 			ServicesConfig.CommonServices,
 			new CallTaskWorker(CallTaskSingletonFactory.GetInstance(),
 				new CallTaskRepository(),
-				OrderSingletonRepository.GetInstance(),
-				EmployeeSingletonRepository.GetInstance(),
-				new BaseParametersProvider(),
+				new OrderRepository(),
+				new EmployeeRepository(),
+				new BaseParametersProvider(parametersProvider),
 				ServicesConfig.CommonServices.UserService,
-				SingletonErrorReporter.Instance));
+				SingletonErrorReporter.Instance),
+            new OrderPaymentSettings(parametersProvider),
+			new OrderParametersProvider(new ParametersProvider()),
+			VodovozGtkServicesConfig.EmployeeService
+		);
 		
 		tdiMain.AddTab(selfDeliveriesJournal);
 	}
 
 	void ActionCashTransferDocuments_Activated(object sender, System.EventArgs e)
 	{
+		var cashRepository = new CashRepository();
+		
 		tdiMain.OpenTab(
 			RepresentationJournalDialog.GenerateHashName<CashTransferDocumentVM>(),
 			() => {
-				var vm = new CashTransferDocumentVM(UnitOfWorkFactory.GetDefaultFactory,
-                    new CashTransferDocumentsFilter());
+				var vm = new CashTransferDocumentVM(
+					UnitOfWorkFactory.GetDefaultFactory,
+                    new CashTransferDocumentsFilter(),
+					cashRepository,
+					new ParametersProvider());
+				
 				return new MultipleEntityJournal("Журнал перемещения д/с", vm, vm);
 			}
 		);
@@ -641,17 +767,17 @@ public partial class MainWindow : Window
 
 	void ActionFuelTransferDocuments_Activated(object sender, System.EventArgs e)
 	{
-		ISubdivisionRepository subdivisionRepository = new SubdivisionRepository();
+		ISubdivisionRepository subdivisionRepository = new SubdivisionRepository(new ParametersProvider());
 		IFuelRepository fuelRepository = new FuelRepository();
 		ICounterpartyJournalFactory counterpartyJournalFactory = new CounterpartyJournalFactory();
 		INomenclatureSelectorFactory nomenclatureSelectorFactory = new NomenclatureSelectorFactory();
 		IEmployeeJournalFactory employeeJournalFactory = new EmployeeJournalFactory();
+		var subdivisionJournalFactory = new SubdivisionJournalFactory();
 		ICarJournalFactory carJournalFactory = new CarJournalFactory();
 		
 		IFileChooserProvider fileChooserProvider = new Vodovoz.FileChooser("Категория Расхода.csv");
-		var  expenseCategoryJournalFilterViewModel = new ExpenseCategoryJournalFilterViewModel(); 
-		
-		
+		var  expenseCategoryJournalFilterViewModel = new ExpenseCategoryJournalFilterViewModel();
+
 		var fuelDocumentsJournalViewModel = new FuelDocumentsJournalViewModel(
 			UnitOfWorkFactory.GetDefaultFactory,
 			ServicesConfig.CommonServices,
@@ -661,12 +787,37 @@ public partial class MainWindow : Window
 			counterpartyJournalFactory,
 			nomenclatureSelectorFactory,
 			employeeJournalFactory,
+			subdivisionJournalFactory,
 			carJournalFactory,
 			new GtkReportViewOpener(),
 			fileChooserProvider,
 			expenseCategoryJournalFilterViewModel
 		);
 		tdiMain.AddTab(fuelDocumentsJournalViewModel);
+	}
+
+	void ActionOrganizationCashTransferDocuments_Activated(object sender, System.EventArgs e)
+	{
+		var entityExtendedPermissionValidator = new EntityExtendedPermissionValidator(
+			PermissionExtensionSingletonStore.GetInstance(), new EmployeeRepository());
+		
+		var employeeFilter = new EmployeeFilterViewModel
+		{
+			Status = EmployeeStatus.IsWorking,
+		};
+		
+		var employeeJournalFactory = new EmployeeJournalFactory(employeeFilter);
+		
+		tdiMain.OpenTab(() => new OrganizationCashTransferDocumentJournalViewModel(
+			new OrganizationCashTransferDocumentFilterViewModel(employeeJournalFactory.CreateEmployeeAutocompleteSelectorFactory())
+			{
+				HidenByDefault = true
+			},
+			UnitOfWorkFactory.GetDefaultFactory,
+			ServicesConfig.CommonServices,
+			entityExtendedPermissionValidator,
+			VodovozGtkServicesConfig.EmployeeService)
+		);
 	}
 
 	void ActionFinesJournal_Activated(object sender, System.EventArgs e)
@@ -687,14 +838,30 @@ public partial class MainWindow : Window
 
 	void ActionPremiumJournal_Activated(object sender, System.EventArgs e)
 	{
-		tdiMain.OpenTab(
-			PermissionControlledRepresentationJournal.GenerateHashName<PremiumVM>(),
-			() => {
-				Buttons buttons = ServicesConfig.CommonServices.CurrentPermissionService.ValidatePresetPermission("can_delete_fines")
-														  ? Buttons.All
-														  : (Buttons.Add | Buttons.Edit);
-				return new PermissionControlledRepresentationJournal(new PremiumVM(), buttons).CustomTabName("Журнал премий");
-			}
+		IEmployeeJournalFactory employeeJournalFactory = new EmployeeJournalFactory();
+		IPremiumTemplateJournalFactory premiumTemplateJournalFactory = new PremiumTemplateJournalFactory();
+
+		var subdivisionAutocompleteSelectorFactory =
+			new EntityAutocompleteSelectorFactory<SubdivisionsJournalViewModel>(typeof(Subdivision), () =>
+			{
+				return new SubdivisionsJournalViewModel(
+					new SubdivisionFilterViewModel() { SubdivisionType = SubdivisionType.Default },
+					UnitOfWorkFactory.GetDefaultFactory,
+					ServicesConfig.CommonServices,
+					employeeJournalFactory.CreateEmployeeAutocompleteSelectorFactory(),
+					new SalesPlanJournalFactory(),
+					new NomenclatureSelectorFactory()
+				);
+			});
+
+		tdiMain.OpenTab(() => new PremiumJournalViewModel(
+			new PremiumJournalFilterViewModel(subdivisionAutocompleteSelectorFactory) { HidenByDefault = true },
+			UnitOfWorkFactory.GetDefaultFactory,
+			ServicesConfig.CommonServices,
+			VodovozGtkServicesConfig.EmployeeService,
+			employeeJournalFactory,
+			premiumTemplateJournalFactory
+			)
 		);
 	}
 
@@ -718,7 +885,7 @@ public partial class MainWindow : Window
 	{
 		tdiMain.OpenTab(
 			QSReport.ReportViewDlg.GenerateHashName<Vodovoz.Reports.AccountFlow>(),
-			() => new QSReport.ReportViewDlg(new Vodovoz.Reports.AccountFlow())
+			() => new QSReport.ReportViewDlg(new Vodovoz.Reports.AccountFlow(new CategoryRepository(new ParametersProvider())))
 		);
 	}
 
@@ -777,6 +944,8 @@ public partial class MainWindow : Window
 
 	void ActionRouteListClosingTable_Activated(object sender, System.EventArgs e)
 	{
+		var parametersProvider = new ParametersProvider();
+		
         tdiMain.OpenTab(
             () => {
                 var routeListFilter = new RouteListJournalFilterViewModel();
@@ -785,11 +954,11 @@ public partial class MainWindow : Window
                      routeListFilter,
                      UnitOfWorkFactory.GetDefaultFactory,
                      ServicesConfig.CommonServices,
-                     new RouteListRepository(),
+                     new RouteListRepository(new StockRepository(), new BaseParametersProvider(parametersProvider)),
                      new FuelRepository(),
                      new CallTaskRepository(),
-                     new BaseParametersProvider(),
-                     new SubdivisionRepository()
+                     new BaseParametersProvider(parametersProvider),
+                     new SubdivisionRepository(parametersProvider)
                      );
             }
         );
@@ -797,9 +966,13 @@ public partial class MainWindow : Window
 
 	void ActionRouteListTracking_Activated(object sender, System.EventArgs e)
 	{
+		var employeeRepository = new EmployeeRepository();
+		var chatRepository = new ChatRepository();
+		var trackRepository = new TrackRepository();
+		
 		tdiMain.OpenTab(
 			TdiTabBase.GenerateHashName<RouteListTrackDlg>(),
-			() => new RouteListTrackDlg()
+			() => new RouteListTrackDlg(employeeRepository, chatRepository, trackRepository)
 		);
 	}
 
@@ -821,10 +994,12 @@ public partial class MainWindow : Window
 
 	void ActionCashDocuments_Activated(object sender, System.EventArgs e)
 	{
+		var cashRepository = new CashRepository();
+		
 		tdiMain.OpenTab(
 			RepresentationJournalDialog.GenerateHashName<CashMultipleDocumentVM>(),
 			() => {
-				var vm = new CashMultipleDocumentVM(new CashDocumentsFilter());
+				var vm = new CashMultipleDocumentVM(new CashDocumentsFilter(), cashRepository);
 				return new MultipleEntityJournal("Журнал кассовых документов", vm, vm);
 			}
 		);
@@ -868,9 +1043,25 @@ public partial class MainWindow : Window
 
 	void ActionWarehouseStock_Activated(object sender, System.EventArgs e)
 	{
-		NomenclatureStockFilterViewModel filter = new NomenclatureStockFilterViewModel(
-			new WarehouseRepository()
-		) {ShowArchive = true};
+		bool userHasOnlyAccessToWarehouseAndComplaints;
+
+		using(var uow = UnitOfWorkFactory.CreateWithoutRoot())
+		{
+			userHasOnlyAccessToWarehouseAndComplaints =
+				ServicesConfig.CommonServices.CurrentPermissionService.ValidatePresetPermission("user_have_access_only_to_warehouse_and_complaints")
+				&& !ServicesConfig.CommonServices.UserService.GetCurrentUser(uow).IsAdmin;
+		}
+		
+		var defaultWarehouse = CurrentUserSettings.Settings.DefaultWarehouse;
+		NomenclatureStockFilterViewModel filter = new NomenclatureStockFilterViewModel(new WarehouseSelectorFactory())
+		{
+			ShowArchive = true
+		};
+
+		if(userHasOnlyAccessToWarehouseAndComplaints && defaultWarehouse != null)
+		{
+			filter.RestrictWarehouse = defaultWarehouse;
+		}
 
 		NomenclatureStockBalanceJournalViewModel vm = new NomenclatureStockBalanceJournalViewModel(
 			filter,
@@ -897,40 +1088,40 @@ public partial class MainWindow : Window
 		);
 	}
 
-	void ActionOrdersTableActivated(object sender, System.EventArgs e) {
-		var nomenclatureRepository = new NomenclatureRepository(new NomenclatureParametersProvider());
-		
-		IEntityAutocompleteSelectorFactory counterpartySelectorFactory =
-			new DefaultEntityAutocompleteSelectorFactory<Counterparty, CounterpartyJournalViewModel,
-				CounterpartyJournalFilterViewModel>(ServicesConfig.CommonServices);
-		
-		IEntityAutocompleteSelectorFactory nomenclatureSelectorFactory =
-			new NomenclatureAutoCompleteSelectorFactory<Nomenclature,NomenclaturesJournalViewModel>(ServicesConfig.CommonServices,
-				new NomenclatureFilterViewModel(), counterpartySelectorFactory, nomenclatureRepository,
-				UserSingletonRepository.GetInstance());
-		
-		OrderJournalFilterViewModel filter = new OrderJournalFilterViewModel() { IsForRetail = false };
-		var ordersJournal = new OrderJournalViewModel(filter, 
-													  UnitOfWorkFactory.GetDefaultFactory, 
-													  ServicesConfig.CommonServices,
-													  VodovozGtkServicesConfig.EmployeeService,
-													  nomenclatureSelectorFactory,
-													  counterpartySelectorFactory,
-													  nomenclatureRepository,
-													  UserSingletonRepository.GetInstance());
-		tdiMain.AddTab(ordersJournal);
+	void ActionOrdersTableActivated(object sender, System.EventArgs e)
+	{
+		var counterpartyJournalFactory = new CounterpartyJournalFactory();
+		var deliveryPointJournalFactory = new DeliveryPointJournalFactory();
+		var filter = new OrderJournalFilterViewModel(counterpartyJournalFactory, deliveryPointJournalFactory)
+		{
+			IsForRetail = false
+		};
+
+		NavigationManager.OpenViewModel<OrderJournalViewModel, OrderJournalFilterViewModel>(null, filter, OpenPageOptions.IgnoreHash);
 	}
 
 	void ActionUndeliveredOrdersActivated(object sender, System.EventArgs e)
 	{
-		tdiMain.OpenTab(
-			TdiTabBase.GenerateHashName<UndeliveriesView>(),
-			() => {
-				var view = new UndeliveriesView {
-					ButtonMode = ServicesConfig.CommonServices.CurrentPermissionService.ValidatePresetPermission("can_edit_undeliveries") ? ReferenceButtonMode.CanAll : ReferenceButtonMode.CanAdd
-				};
-				return view;
-			}
+		ISubdivisionJournalFactory subdivisionJournalFactory = new SubdivisionJournalFactory();
+
+		var undeliveredOrdersFilter = new UndeliveredOrdersFilterViewModel(ServicesConfig.CommonServices, new OrderSelectorFactory(),
+			new EmployeeJournalFactory(), new CounterpartyJournalFactory(), new DeliveryPointJournalFactory(), subdivisionJournalFactory)
+		{
+			HidenByDefault = true,
+			RestrictUndeliveryStatus = UndeliveryStatus.InProcess,
+			RestrictNotIsProblematicCases = true
+		};
+
+		tdiMain.OpenTab(() => new UndeliveredOrdersJournalViewModel(
+			undeliveredOrdersFilter,
+			UnitOfWorkFactory.GetDefaultFactory,
+			ServicesConfig.CommonServices,
+			new GtkTabsOpener(),
+			new EmployeeJournalFactory(),
+			VodovozGtkServicesConfig.EmployeeService,
+			new UndeliveredOrdersJournalOpener(),
+			new OrderSelectorFactory(),
+			new UndeliveredOrdersRepository())
 		);
 	}
 
@@ -940,6 +1131,8 @@ public partial class MainWindow : Window
 		IDepositRepository depositRepository = new DepositRepository();
 		IBottlesRepository bottlesRepository = new BottlesRepository();
 		ResidueFilterViewModel filter = new ResidueFilterViewModel();
+		var employeeJournalFactory = new EmployeeJournalFactory();
+		
 		var residueJournalViewModel = new ResidueJournalViewModel(
 			filter,
 			VodovozGtkServicesConfig.EmployeeService,
@@ -949,7 +1142,7 @@ public partial class MainWindow : Window
 			bottlesRepository,
 			UnitOfWorkFactory.GetDefaultFactory,
 			ServicesConfig.CommonServices,
-			new DefaultEntityAutocompleteSelectorFactory<Employee, EmployeesJournalViewModel, EmployeeFilterViewModel>(ServicesConfig.CommonServices)
+			employeeJournalFactory.CreateEmployeeAutocompleteSelectorFactory()
 		);
 		tdiMain.AddTab(residueJournalViewModel);
 	}
@@ -973,7 +1166,25 @@ public partial class MainWindow : Window
 	void ActionDistrictsActivated(object sender, System.EventArgs e)
 	{
 		var filter = new DistrictsSetJournalFilterViewModel { HidenByDefault = true };
-		tdiMain.OpenTab(() => new DistrictsSetJournalViewModel(filter, UnitOfWorkFactory.GetDefaultFactory, ServicesConfig.CommonServices,
-			EmployeeSingletonRepository.GetInstance(), new EntityDeleteWorker(), true, true));
+		tdiMain.OpenTab(() => new DistrictsSetJournalViewModel(filter, UnitOfWorkFactory.GetDefaultFactory,
+			ServicesConfig.CommonServices, new EmployeeRepository(), new EntityDeleteWorker(),
+			new DeliveryRulesParametersProvider(new ParametersProvider()), true, true));
+	}
+
+	void ActionCarEventsJournalActivated(object sender, System.EventArgs e)
+	{
+		ICarJournalFactory carJournalFactory = new CarJournalFactory();
+		ICarEventTypeJournalFactory carEventTypeJournalFactory = new CarEventTypeJournalFactory();
+
+		var carEventFilter = new CarEventFilterViewModel(carJournalFactory, carEventTypeJournalFactory) { HidenByDefault = true };
+
+		tdiMain.OpenTab(() => new CarEventJournalViewModel(
+			carEventFilter,
+			UnitOfWorkFactory.GetDefaultFactory,
+			ServicesConfig.CommonServices,
+			carJournalFactory,
+			carEventTypeJournalFactory,
+			VodovozGtkServicesConfig.EmployeeService)
+		);
 	}
 }

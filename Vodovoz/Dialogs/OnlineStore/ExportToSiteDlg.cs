@@ -5,7 +5,6 @@ using QS.Dialog.GtkUI;
 using QS.DomainModel.UoW;
 using QS.Project.Services;
 using QSProjectsLib;
-using QSSupportLib;
 using Vodovoz.Parameters;
 using Vodovoz.Tools.CommerceML;
 
@@ -13,6 +12,8 @@ namespace Vodovoz.Dialogs.OnlineStore
 {
 	public partial class ExportToSiteDlg : QS.Dialog.Gtk.TdiTabBase
 	{
+		private readonly IParametersProvider _parametersProvider = new ParametersProvider();
+		
 		public ExportToSiteDlg()
 		{
 			if(!ServicesConfig.CommonServices.CurrentPermissionService.ValidatePresetPermission("database_maintenance")) {
@@ -21,17 +22,29 @@ namespace Vodovoz.Dialogs.OnlineStore
 				return;
 			}
 
-			this.Build();
+			Build();
 			TabName = "Экспорт интернет магазин";
 			comboExportMode.ItemsEnum = typeof(ExportMode);
-			if(ParametersProvider.Instance.ContainsParameter(Export.OnlineStoreUrlParameterName))
-				entrySitePath.Text = ParametersProvider.Instance.GetParameterValue(Export.OnlineStoreUrlParameterName);
-			if(ParametersProvider.Instance.ContainsParameter(Export.OnlineStoreLoginParameterName))
-				entryUser.Text = ParametersProvider.Instance.GetParameterValue(Export.OnlineStoreLoginParameterName);
-			if(ParametersProvider.Instance.ContainsParameter(Export.OnlineStorePasswordParameterName))
-				entryPassword.Text = ParametersProvider.Instance.GetParameterValue(Export.OnlineStorePasswordParameterName);
-			if(ParametersProvider.Instance.ContainsParameter(Export.OnlineStoreExportMode))
-				comboExportMode.SelectedItem = Enum.Parse(typeof(ExportMode), ParametersProvider.Instance.GetParameterValue(Export.OnlineStoreExportMode));
+			
+			if(_parametersProvider.ContainsParameter(Export.OnlineStoreUrlParameterName))
+			{
+				entrySitePath.Text = _parametersProvider.GetParameterValue(Export.OnlineStoreUrlParameterName);
+			}
+
+			if(_parametersProvider.ContainsParameter(Export.OnlineStoreLoginParameterName))
+			{
+				entryUser.Text = _parametersProvider.GetParameterValue(Export.OnlineStoreLoginParameterName);
+			}
+
+			if(_parametersProvider.ContainsParameter(Export.OnlineStorePasswordParameterName))
+			{
+				entryPassword.Text = _parametersProvider.GetParameterValue(Export.OnlineStorePasswordParameterName);
+			}
+
+			if(_parametersProvider.ContainsParameter(Export.OnlineStoreExportMode))
+			{
+				comboExportMode.SelectedItem = Enum.Parse(typeof(ExportMode), _parametersProvider.GetParameterValue(Export.OnlineStoreExportMode));
+			}
 		}
 
 		protected void OnButtonRunToFileClicked(object sender, EventArgs e)
@@ -70,22 +83,22 @@ namespace Vodovoz.Dialogs.OnlineStore
 
 		protected void OnEntrySitePathFocusOutEvent(object o, FocusOutEventArgs args)
 		{
-			MainSupport.BaseParameters.UpdateParameter(QSMain.ConnectionDB, Export.OnlineStoreUrlParameterName, entrySitePath.Text);
+			_parametersProvider.CreateOrUpdateParameter(Export.OnlineStoreUrlParameterName, entrySitePath.Text);
 		}
 
 		protected void OnEntryUserFocusOutEvent(object o, FocusOutEventArgs args)
 		{
-			MainSupport.BaseParameters.UpdateParameter(QSMain.ConnectionDB, Export.OnlineStoreLoginParameterName, entryUser.Text);
+			_parametersProvider.CreateOrUpdateParameter(Export.OnlineStoreLoginParameterName, entryUser.Text);
 		}
 
 		protected void OnEntryPasswordFocusOutEvent(object o, FocusOutEventArgs args)
 		{
-			MainSupport.BaseParameters.UpdateParameter(QSMain.ConnectionDB, Export.OnlineStorePasswordParameterName, entryPassword.Text);
+			_parametersProvider.CreateOrUpdateParameter(Export.OnlineStorePasswordParameterName, entryPassword.Text);
 		}
 
 		protected void OnComboExportModeChangedByUser(object sender, EventArgs e)
 		{
-			MainSupport.BaseParameters.UpdateParameter(QSMain.ConnectionDB, Export.OnlineStoreExportMode, comboExportMode.SelectedItem.ToString());
+			_parametersProvider.CreateOrUpdateParameter(Export.OnlineStoreExportMode,  comboExportMode.SelectedItem.ToString());
 		}
 
 		protected void OnButtonExportToSiteClicked(object sender, EventArgs e)

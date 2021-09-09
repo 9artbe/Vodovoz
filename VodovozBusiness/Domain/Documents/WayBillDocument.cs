@@ -2,7 +2,6 @@ using System;
 using System.Collections.Generic;
 using System.ComponentModel.DataAnnotations;
 using System.Linq;
-using NHibernate;
 using QS.DocTemplates;
 using QS.DomainModel.Entity;
 using QS.DomainModel.UoW;
@@ -11,14 +10,14 @@ using Vodovoz.Domain.Client;
 using Vodovoz.Domain.Logistic;
 using Vodovoz.Domain.Orders.Documents;
 using Vodovoz.Domain.Organizations;
+using Vodovoz.EntityRepositories.Counterparties;
 using Vodovoz.Tools.Logistic;
 
 namespace Vodovoz.Domain.Documents
 {
     public class WayBillDocument : PropertyChangedBase, IPrintableOdtDocument, ITemplateOdtDocument
     {
-
-        #region DistanceCalc
+	    #region DistanceCalc
 
         public virtual void RecalculatePlanedDistance(RouteGeometryCalculator distanceCalculator)
         {
@@ -191,21 +190,26 @@ namespace Vodovoz.Domain.Documents
             set { SetField(ref organization, value, () => Organization); }
         }
 
-        public void PrepareTemplate(IUnitOfWork uow)
+        public void PrepareTemplate(IUnitOfWork uow, IDocTemplateRepository docTemplateRepository)
         {
             if (DocumentTemplate == null)
             {
-                var tempTemplate = Repository.Client.DocTemplateRepository.GetFirstAvailableTemplate(uow, TemplateType.WayBill, Organization);
+                var tempTemplate = docTemplateRepository.GetFirstAvailableTemplate(uow, TemplateType.WayBill, Organization);
 
-                var newTemplate = new DocTemplate() // Клонирование шаблона, необходимо, если будете печатать несколько одинаковых ODT
+                DocTemplate newTemplate = null;
+
+                if (tempTemplate != null)
                 {
-                    Id = tempTemplate.Id,
-                    Name = tempTemplate.Name,
-                    Organization = tempTemplate.Organization,
-                    ContractType = tempTemplate.ContractType,
-                    TempalteFile = tempTemplate.TempalteFile,
-                    TemplateType = tempTemplate.TemplateType
-                };
+                    newTemplate = new DocTemplate() // Клонирование шаблона, необходимо, если будете печатать несколько одинаковых ODT
+                    {
+                        Id = tempTemplate.Id,
+                        Name = tempTemplate.Name,
+                        Organization = tempTemplate.Organization,
+                        ContractType = tempTemplate.ContractType,
+                        TempalteFile = tempTemplate.TempalteFile,
+                        TemplateType = tempTemplate.TemplateType
+                    };
+                }
                 
                 DocumentTemplate = newTemplate;
             }

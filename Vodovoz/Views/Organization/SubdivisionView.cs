@@ -6,13 +6,14 @@ using QS.Views.GtkUI;
 using QSOrmProject;
 using Vodovoz.Domain.Sale;
 using Vodovoz.Representations;
-using Vodovoz.ViewModels.Organization;
+using Vodovoz.ViewModels.ViewModels.Organizations;
 
 namespace Vodovoz.Views.Organization
 {
 	[System.ComponentModel.ToolboxItem(true)]
 	public partial class SubdivisionView : TabViewBase<SubdivisionViewModel>
 	{
+		
 		public SubdivisionView(SubdivisionViewModel viewModel) : base(viewModel)
 		{
 			this.Build();
@@ -59,10 +60,15 @@ namespace Vodovoz.Views.Organization
 			ytreeviewDocuments.Binding.AddBinding(ViewModel.Entity, e => e.ObservableDocumentTypes, w => w.ItemsDataSource).InitializeFromSource();
 
 			lblWarehouses.LineWrapMode = Pango.WrapMode.Word;
+			
 			if(ViewModel.Entity.Id > 0)
-				lblWarehouses.Text = ViewModel.Entity.GetWarehousesNames(ViewModel.UoW);
+			{
+				lblWarehouses.Text = ViewModel.Entity.GetWarehousesNames(ViewModel.UoW, ViewModel.SubdivisionRepository);
+			}
 			else
+			{
 				frmWarehoses.Visible = false;
+			}
 
 			vboxDocuments.Visible = ViewModel.CurrentUser.IsAdmin;
 			widgetcontainerview2.Visible = ViewModel.CurrentUser.IsAdmin;
@@ -74,11 +80,15 @@ namespace Vodovoz.Views.Organization
 			ytreeviewDocuments.Selection.Changed += (sender, e) => buttonDeleteDocument.Sensitive = ViewModel.DeleteDocumentCommand.CanExecute(ytreeviewDocuments.GetSelectedObject() as TypeOfEntity);
 
 			buttonSave.Clicked += (sender, e) => { ViewModel.SaveAndClose(); };
-			buttonCancel.Clicked += (sender, e) => { ViewModel.Close(false, QS.Navigation.CloseSource.Cancel); };
+			buttonCancel.Clicked += (sender, e) => { ViewModel.Close(true, QS.Navigation.CloseSource.Cancel); };
 
 			ViewModel.OnSavedEntity += () => subdivisionentitypermissionwidget.ViewModel.SavePermissions(subdivisionentitypermissionwidget.UoW);
 
 			widgetcontainerview2.Binding.AddBinding(ViewModel, vm => vm.PresetSubdivisionPermissionVM, w => w.WidgetViewModel).InitializeFromSource();
+
+			entryDefaultSalesPlan.SetEntityAutocompleteSelectorFactory(ViewModel.SalesPlanSelectorFactory);
+			entryDefaultSalesPlan.Binding.AddBinding(ViewModel.Entity, e => e.DefaultSalesPlan, w => w.Subject).InitializeFromSource();
+			entryDefaultSalesPlan.CanEditReference = false;
 		}
 
 		void ButtonAddDocument_Clicked(object sender, EventArgs e)

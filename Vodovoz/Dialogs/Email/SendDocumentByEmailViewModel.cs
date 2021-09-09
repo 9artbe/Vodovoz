@@ -19,6 +19,7 @@ using QS.Dialog;
 using QS.Project.Services;
 using QS.Services;
 using RdlEngine;
+using Vodovoz.Domain.Employees;
 using Vodovoz.Domain.Orders.OrdersWithoutShipment;
 using Vodovoz.Domain.Orders;
 
@@ -51,8 +52,9 @@ namespace Vodovoz.Dialogs.Email
 		}
 
 		private readonly IEmailRepository emailRepository;
-		private readonly IEmployeeRepository employeeRepository;
 		private readonly IInteractiveService interactiveService;
+		private readonly IParametersProvider _parametersProvider;
+		private readonly Employee _currentEmployee;
 		private IDocument Document { get; set; }
 
 		public GenericObservableList<StoredEmail> StoredEmails { get; set; }
@@ -61,11 +63,17 @@ namespace Vodovoz.Dialogs.Email
 
 		public DelegateCommand RefreshEmailListCommand { get; private set; }
 
-		public SendDocumentByEmailViewModel(IEmailRepository emailRepository, IEmployeeRepository employeeRepository, IInteractiveService interactiveService, IUnitOfWork uow = null)
+		public SendDocumentByEmailViewModel(
+			IEmailRepository emailRepository,
+			Employee currentEmployee,
+			IInteractiveService interactiveService,
+			IParametersProvider parametersProvider,
+			IUnitOfWork uow = null)
 		{
 			this.emailRepository = emailRepository ?? throw new ArgumentNullException(nameof(emailRepository));
-			this.employeeRepository = employeeRepository ?? throw new ArgumentNullException(nameof(employeeRepository));
+			_currentEmployee = currentEmployee;
             this.interactiveService = interactiveService ?? throw new ArgumentNullException(nameof(interactiveService));
+            _parametersProvider = parametersProvider ?? throw new ArgumentNullException(nameof(parametersProvider));
             StoredEmails = new GenericObservableList<StoredEmail>();
 			UoW = uow;
 
@@ -242,7 +250,8 @@ namespace Vodovoz.Dialogs.Email
 				return;
 			}
 
-			if(!ParametersProvider.Instance.ContainsParameter("email_for_email_delivery")) {
+			if(!_parametersProvider.ContainsParameter("email_for_email_delivery"))
+			{
 				interactiveService.ShowMessage(ImportanceLevel.Warning,"В параметрах базы не определена почта для рассылки");
 				return;
 			}
@@ -252,23 +261,20 @@ namespace Vodovoz.Dialogs.Email
 				return;
 			}
 
-			EmailService.Email email = CreateDocumentEmail("", "vodovoz-spb.ru", Document);
+			EmailService.OrderEmail email = CreateDocumentEmail("", "vodovoz-spb.ru", Document);
 			if(email == null) {
 				interactiveService.ShowMessage(ImportanceLevel.Warning,"Для данного типа документа не реализовано формирование письма");
 				return;
 			}
-
-			using(var uow = UnitOfWorkFactory.CreateWithoutRoot()) {
-				var employee = employeeRepository.GetEmployeeForCurrentUser(uow);
-				email.AuthorId = employee != null ? employee.Id : 0;
-				email.ManualSending = true;
-			}
+			
+			email.AuthorId = _currentEmployee?.Id ?? 0;
+			email.ManualSending = true;
 
 			IEmailService service = EmailServiceSetting.GetEmailService();
 			if(service == null) {
 				return;
 			}
-			var result = service.SendEmail(email);
+			var result = service.SendOrderEmail(email);
 
 			switch (Document.Type)
 			{
@@ -299,12 +305,12 @@ namespace Vodovoz.Dialogs.Email
 			UpdateEmails();
 		}
 
-		private EmailService.Email CreateDocumentEmail(string clientName, string organizationName, IDocument document)
+		private EmailService.OrderEmail CreateDocumentEmail(string clientName, string organizationName, IDocument document)
 		{
 			bool wasHideSignature;
 			ReportInfo ri = null;
 			EmailTemplate template = null;
-			EmailService.Email email = null;
+			EmailService.OrderEmail email = null;
 
 			switch(document.Type) {
 
@@ -316,7 +322,7 @@ namespace Vodovoz.Dialogs.Email
 					billDocument.HideSignature = wasHideSignature;
 
 					template = billDocument.GetEmailTemplate();
-					email = new EmailService.Email();
+					email = new EmailService.OrderEmail();
 					email.Title = string.Format($"{template.Title} {billDocument.Title}");
 					email.Text = template.Text;
 					email.HtmlText = template.TextHtml;
@@ -326,7 +332,7 @@ namespace Vodovoz.Dialogs.Email
 					}
 
 					email.Recipient = new EmailContact(clientName, EmailString);
-					email.Sender = new EmailContact(organizationName, ParametersProvider.Instance.GetParameterValue("email_for_email_delivery"));
+					email.Sender = new EmailContact(organizationName, _parametersProvider.GetParameterValue("email_for_email_delivery"));
 					email.Order = document.Order.Id;
 					email.OrderDocumentType = document.Type;
 
@@ -343,7 +349,7 @@ namespace Vodovoz.Dialogs.Email
 					billWSFDDocument.HideSignature = wasHideSignature;
 
 					template = billWSFDDocument.GetEmailTemplate();
-					email = new EmailService.Email();
+					email = new EmailService.OrderEmail();
 					email.Title = string.Format($"{template.Title} {billWSFDDocument.Title}");
 					email.Text = template.Text;
 					email.HtmlText = template.TextHtml;
@@ -353,7 +359,7 @@ namespace Vodovoz.Dialogs.Email
 					}
 
 					email.Recipient = new EmailContact(clientName, EmailString);
-					email.Sender = new EmailContact(organizationName, ParametersProvider.Instance.GetParameterValue("email_for_email_delivery"));
+					email.Sender = new EmailContact(organizationName, _parametersProvider.GetParameterValue("email_for_email_delivery"));
 					email.Order = document.Id;
 					email.OrderDocumentType = document.Type;
 
@@ -370,7 +376,7 @@ namespace Vodovoz.Dialogs.Email
 					billWSFAPDocument.HideSignature = wasHideSignature;
 
 					template = billWSFAPDocument.GetEmailTemplate();
-					email = new EmailService.Email();
+					email = new EmailService.OrderEmail();
 					email.Title = string.Format($"{template.Title} {billWSFAPDocument.Title}");
 					email.Text = template.Text;
 					email.HtmlText = template.TextHtml;
@@ -380,7 +386,7 @@ namespace Vodovoz.Dialogs.Email
 					}
 
 					email.Recipient = new EmailContact(clientName, EmailString);
-					email.Sender = new EmailContact(organizationName, ParametersProvider.Instance.GetParameterValue("email_for_email_delivery"));
+					email.Sender = new EmailContact(organizationName, _parametersProvider.GetParameterValue("email_for_email_delivery"));
 					email.Order = document.Id;
 					email.OrderDocumentType = document.Type;
 
@@ -397,7 +403,7 @@ namespace Vodovoz.Dialogs.Email
 					billWSFPDocument.HideSignature = wasHideSignature;
 
 					template = billWSFPDocument.GetEmailTemplate();
-					email = new EmailService.Email();
+					email = new EmailService.OrderEmail();
 					email.Title = string.Format($"{template.Title} {billWSFPDocument.Title}");
 					email.Text = template.Text;
 					email.HtmlText = template.TextHtml;
@@ -407,7 +413,7 @@ namespace Vodovoz.Dialogs.Email
 					}
 
 					email.Recipient = new EmailContact(clientName, EmailString);
-					email.Sender = new EmailContact(organizationName, ParametersProvider.Instance.GetParameterValue("email_for_email_delivery"));
+					email.Sender = new EmailContact(organizationName, _parametersProvider.GetParameterValue("email_for_email_delivery"));
 					email.Order = document.Id;
 					email.OrderDocumentType = document.Type;
 

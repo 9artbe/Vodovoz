@@ -1,4 +1,5 @@
-using System;
+﻿using System;
+using System.Collections.Generic;
 
 namespace Vodovoz.Domain.WageCalculation.CalculationServices.RouteList
 {
@@ -13,8 +14,8 @@ namespace Vodovoz.Domain.WageCalculation.CalculationServices.RouteList
 			this.wageParameter = wageParameter ?? throw new ArgumentNullException(nameof(wageParameter));
 			this.source = source ?? throw new ArgumentNullException(nameof(source));
 
-			if(source.DriverOfOurCar && wageParameter.DriverWithOurCarsWageParameterItem != null) {
-				SetWageCalculationService(wageParameter.DriverWithOurCarsWageParameterItem);
+			if(source.DriverOfOurCar && wageParameter.WageParameterItemForOurCars != null) {
+				SetWageCalculationService(wageParameter.WageParameterItemForOurCars);
 			}
 			else {
 				SetWageCalculationService(wageParameter.WageParameterItem);
@@ -49,9 +50,17 @@ namespace Vodovoz.Domain.WageCalculation.CalculationServices.RouteList
 			return calculationService.CalculateWageForRouteListItem(source);
 		}
 
+
 		public RouteListWageResult CalculateWage()
 		{
 			return calculationService.CalculateWage();
 		}
+
+		public RouteListItemWageCalculationDetails GetWageCalculationDetailsForRouteListItem(IRouteListItemWageCalculationSource source)
+		{
+			return calculationService.GetWageCalculationDetailsForRouteListItem(source);
+		}
+
+		public IRouteListWageCalculationService GetWageCalculationService => calculationService;
 	}
 }

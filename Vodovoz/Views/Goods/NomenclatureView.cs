@@ -50,17 +50,17 @@ namespace Vodovoz.Views.Goods
 			#endregion
 
 			buttonSave.Clicked += (sender, args) => ViewModel.SaveCommand.Execute();
-			buttonCancel.Clicked += (sender, args) => ViewModel.Close(false, CloseSource.Cancel);	
+			buttonCancel.Clicked += (sender, args) => ViewModel.Close(true, CloseSource.Cancel);	
 			ylabelCreationDate.Binding.AddFuncBinding(ViewModel.Entity, s => s.CreateDate.HasValue ? s.CreateDate.Value.ToString("dd.MM.yyyy HH:mm") : "", w => w.LabelProp).InitializeFromSource();
 			ylabelCreatedBy.Binding.AddFuncBinding(ViewModel.Entity, e => ViewModel.GetUserEmployeeName(), w => w.LabelProp).InitializeFromSource();
 
 			enumVAT.ItemsEnum = typeof(VAT);
 			enumVAT.Binding.AddBinding(ViewModel.Entity, e => e.VAT, w => w.SelectedItem).InitializeFromSource();
 
-			enumType.Changed += ViewModel.OnEnumTypeChanged;
-			enumType.ChangedByUser += ViewModel.OnEnumTypeChangedByUser;
-			enumType.ItemsEnum = typeof(NomenclatureCategory);
-			enumType.Binding.AddBinding(ViewModel.Entity, e => e.Category, w => w.SelectedItem).InitializeFromSource();
+			enumCategory.Changed += ViewModel.OnEnumKindChanged;
+			enumCategory.ChangedByUser += ViewModel.OnEnumKindChangedByUser;
+			enumCategory.ItemsEnum = typeof(NomenclatureCategory);
+			enumCategory.Binding.AddBinding(ViewModel.Entity, e => e.Category, w => w.SelectedItem).InitializeFromSource();
 
 			enumTareVolume.ItemsEnum = typeof(TareVolume);
 			enumTareVolume.Binding.AddBinding(ViewModel.Entity, e => e.TareVolume, w => w.SelectedItemOrNull).InitializeFromSource();
@@ -130,8 +130,8 @@ namespace Vodovoz.Views.Goods
 			lblFuelType.Binding.AddBinding(ViewModel, vm => vm.VisibilityFuelCategoryItems, w => w.Visible).InitializeFromSource();
 
 			ylblOnlineStore.Text = ViewModel.Entity.OnlineStore?.Name;
-			ylblOnlineStore.Binding.AddBinding(ViewModel, vm => vm.IsOnlineStoreProductGroup, w => w.Visible).InitializeFromSource();
-			ylblOnlineStoreStr.Binding.AddBinding(ViewModel, vm => vm.IsOnlineStoreProductGroup, w => w.Visible).InitializeFromSource();
+			ylblOnlineStore.Binding.AddBinding(ViewModel, vm => vm.IsOnlineStoreNomenclature, w => w.Visible).InitializeFromSource();
+			ylblOnlineStoreStr.Binding.AddBinding(ViewModel, vm => vm.IsOnlineStoreNomenclature, w => w.Visible).InitializeFromSource();
 
 			yentryFolder1c.SubjectType = typeof(Folder1c);
 			yentryFolder1c.Binding.AddBinding(ViewModel.Entity, e => e.Folder1C, w => w.Subject).InitializeFromSource();
@@ -161,9 +161,6 @@ namespace Vodovoz.Views.Goods
 			yentryStorageCell.Binding.AddBinding(ViewModel.Entity, s => s.StorageCell, w => w.Text).InitializeFromSource();
 			yentryStorageCell.Binding.AddBinding(ViewModel, vm => vm.IsEshopNomenclature, w => w.Visible).InitializeFromSource();
 			labelStorageCell.Binding.AddBinding(ViewModel, vm => vm.IsEshopNomenclature, w => w.Visible).InitializeFromSource();
-			yspinbuttonPurchasePrice.Binding.AddBinding(ViewModel.Entity, s => s.PurchasePrice, w => w.ValueAsDecimal).InitializeFromSource();
-			yspinbuttonPurchasePrice.Binding.AddBinding(ViewModel, vm => vm.IsEshopNomenclature, w => w.Visible).InitializeFromSource();
-			labelPurchasePrice.Binding.AddBinding(ViewModel, vm => vm.IsEshopNomenclature, w => w.Visible).InitializeFromSource();
 
 			#region Вкладка Оборудование
 
@@ -177,10 +174,10 @@ namespace Vodovoz.Views.Goods
 			referenceColor.Binding.AddBinding(ViewModel.Entity, e => e.EquipmentColor, w => w.Subject).InitializeFromSource();
 			referenceColor.Binding.AddBinding(ViewModel, vm => vm.SensitivityEquipmentCategoryItems, w => w.Sensitive).InitializeFromSource();
 
-			labelClass.Binding.AddBinding(ViewModel, vm => vm.SensitivityEquipmentCategoryItems, w => w.Sensitive).InitializeFromSource();
-			yentryrefEqupmentType.SubjectType = typeof(EquipmentType);
-			yentryrefEqupmentType.Binding.AddBinding(ViewModel.Entity, e => e.Type, w => w.Subject).InitializeFromSource();
-			yentryrefEqupmentType.Binding.AddBinding(ViewModel, vm => vm.SensitivityEquipmentCategoryItems, w => w.Sensitive).InitializeFromSource();
+			labelKind.Binding.AddBinding(ViewModel, vm => vm.SensitivityEquipmentCategoryItems, w => w.Sensitive).InitializeFromSource();
+			yentryrefEqupmentKind.SubjectType = typeof(EquipmentKind);
+			yentryrefEqupmentKind.Binding.AddBinding(ViewModel.Entity, e => e.Kind, w => w.Subject).InitializeFromSource();
+			yentryrefEqupmentKind.Binding.AddBinding(ViewModel, vm => vm.SensitivityEquipmentCategoryItems, w => w.Sensitive).InitializeFromSource();
 
 			labelModel.Binding.AddBinding(ViewModel, vm => vm.SensitivityEquipmentCategoryItems, w => w.Sensitive).InitializeFromSource();
 			entryModel.Binding.AddBinding(ViewModel, vm => vm.SensitivityEquipmentCategoryItems, w => w.Sensitive).InitializeFromSource();
@@ -199,6 +196,12 @@ namespace Vodovoz.Views.Goods
 
 			ytextDescription.Binding.AddBinding(ViewModel.Entity, e => e.Description, w => w.Buffer.Text).InitializeFromSource();
 			nomenclaturecharacteristicsview1.Uow = ViewModel.UoWGeneric;
+
+			#endregion
+
+			#region Вкладка Цена закупки
+
+			nomenclaturePurchasePricesView.ViewModel = ViewModel.NomenclaturePurchasePricesViewModel;
 
 			#endregion
 
@@ -284,6 +287,14 @@ namespace Vodovoz.Views.Goods
 		{
 			if(radioPrice.Active)
 				notebook1.CurrentPage = 4;
+		}
+
+		protected void OnPurchasePriceToggled(object sender, EventArgs e)
+		{
+			if(radioPurchasePrice.Active)
+			{
+				notebook1.CurrentPage = 5;
+			}
 		}
 
 		#endregion

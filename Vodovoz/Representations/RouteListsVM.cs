@@ -1,6 +1,7 @@
 ﻿using System;
 using System.Collections.Generic;
 using System.Linq;
+using System.Text;
 using Dialogs.Logistic;
 using Gamma.ColumnConfig;
 using Gamma.Utilities;
@@ -32,12 +33,24 @@ using Vodovoz.ViewModels.FuelDocuments;
 using Vodovoz.ViewModels.Logistic;
 using QS.Project.Domain;
 using QS.DomainModel.NotifyChange;
+using Vodovoz.Dialogs.OrderWidgets;
+using Vodovoz.EntityRepositories.Cash;
+using Vodovoz.EntityRepositories.Logistic;
+using Vodovoz.Domain.Documents.DriverTerminal;
+using Vodovoz.EntityRepositories.Store;
+using Vodovoz.EntityRepositories.Undeliveries;
+using Vodovoz.JournalViewers;
 using Vodovoz.ViewModels.Journals.FilterViewModels.Logistic;
+using Vodovoz.Parameters;
+using Vodovoz.TempAdapters;
 
 namespace Vodovoz.ViewModel
 {
 	public class RouteListsVM : QSOrmProject.RepresentationModel.RepresentationModelEntityBase<RouteList, RouteListsVMNode>
 	{
+		private readonly IParametersProvider _parametersProvider = new ParametersProvider();
+		private bool _userHasOnlyAccessToWarehouseAndComplaints;
+		
 		public RouteListsFilter Filter {
 			get => RepresentationFilter as RouteListsFilter;
 			set => RepresentationFilter = value as QSOrmProject.RepresentationModel.IRepresentationFilter;
@@ -81,32 +94,52 @@ namespace Vodovoz.ViewModel
 					 .Where(() => geographicGroupsAlias.Id == Filter.RestrictGeographicGroup.Id);
 			}
 
+			if(Filter.ShowDriversWithTerminal)
+			{
+				DriverAttachedTerminalDocumentBase baseAlias = null;
+				DriverAttachedTerminalGiveoutDocument giveoutAlias = null;
+				var baseQuery = QueryOver.Of(() => baseAlias)
+					.Where(doc => doc.Driver.Id == routeListAlias.Driver.Id)
+					.And(doc => doc.CreationDate.Date <= routeListAlias.Date)
+					.Select(doc => doc.Id).OrderBy(doc => doc.CreationDate).Desc.Take(1);
+				var giveoutQuery = QueryOver.Of(() => giveoutAlias).WithSubquery.WhereProperty(giveout => giveout.Id).Eq(baseQuery)
+					.Select(doc => doc.Driver.Id);
+				query.WithSubquery.WhereProperty(rl => rl.Driver.Id).In(giveoutQuery);
+			}
+
 			#region RouteListAddressTypeFilter
 			
 			//WithDeliveryAddresses(Доставка) означает МЛ без WithChainStoreAddresses(Сетевой магазин) и WithServiceAddresses(Сервисное обслуживание)
-			if(      Filter.WithDeliveryAddresses &&  Filter.WithChainStoreAddresses && !Filter.WithServiceAddresses) {
+			if(Filter.WithDeliveryAddresses && Filter.WithChainStoreAddresses && !Filter.WithServiceAddresses) 
+			{
 				query.Where(() => !driverAlias.VisitingMaster);
 			}
-			else if( Filter.WithDeliveryAddresses && !Filter.WithChainStoreAddresses &&  Filter.WithServiceAddresses) {
+			else if(Filter.WithDeliveryAddresses && !Filter.WithChainStoreAddresses && Filter.WithServiceAddresses) 
+			{
 				query.Where(() => !driverAlias.IsChainStoreDriver);
 			}
-			else if( Filter.WithDeliveryAddresses && !Filter.WithChainStoreAddresses && !Filter.WithServiceAddresses) {
+			else if(Filter.WithDeliveryAddresses && !Filter.WithChainStoreAddresses && !Filter.WithServiceAddresses) 
+			{
 				query.Where(() => !driverAlias.VisitingMaster);
 				query.Where(() => !driverAlias.IsChainStoreDriver);
 			}
-			else if(!Filter.WithDeliveryAddresses &&  Filter.WithChainStoreAddresses &&  Filter.WithServiceAddresses) {
+			else if(!Filter.WithDeliveryAddresses && Filter.WithChainStoreAddresses && Filter.WithServiceAddresses) 
+			{
 				query.Where(Restrictions.Or(
 					Restrictions.Where(() => driverAlias.VisitingMaster),
 					Restrictions.Where(() => driverAlias.IsChainStoreDriver)
 				));
 			}
-			else if(!Filter.WithDeliveryAddresses &&  Filter.WithChainStoreAddresses && !Filter.WithServiceAddresses) {
+			else if(!Filter.WithDeliveryAddresses && Filter.WithChainStoreAddresses && !Filter.WithServiceAddresses) 
+			{
 				query.Where(() => driverAlias.IsChainStoreDriver);
 			}
-			else if(!Filter.WithDeliveryAddresses && !Filter.WithChainStoreAddresses &&  Filter.WithServiceAddresses) {
+			else if(!Filter.WithDeliveryAddresses && !Filter.WithChainStoreAddresses && Filter.WithServiceAddresses) 
+			{
 				query.Where(() => driverAlias.VisitingMaster);
 			}
-			else if(!Filter.WithDeliveryAddresses && !Filter.WithChainStoreAddresses && !Filter.WithServiceAddresses) {
+			else if(!Filter.WithDeliveryAddresses && !Filter.WithChainStoreAddresses && !Filter.WithServiceAddresses) 
+			{
 				SetItemsSource(new List<RouteListsVMNode>());
 				return;
 			}
@@ -204,6 +237,10 @@ namespace Vodovoz.ViewModel
 		{
 			NotifyConfiguration.Enable();
 			NotifyConfiguration.Instance.BatchSubscribeOnEntity<RouteList>(OnRouteListChanged);
+			
+			_userHasOnlyAccessToWarehouseAndComplaints =
+				ServicesConfig.CommonServices.CurrentPermissionService.ValidatePresetPermission("user_have_access_only_to_warehouse_and_complaints")
+				&& !ServicesConfig.CommonServices.UserService.GetCurrentUser(UoW).IsAdmin;
 
 			Filter.SelectedStatuses = new[]{
 					RouteListStatus.New,
@@ -288,13 +325,19 @@ namespace Vodovoz.ViewModel
 				var callTaskWorker = new CallTaskWorker(
 					CallTaskSingletonFactory.GetInstance(),
 					new CallTaskRepository(),
-					OrderSingletonRepository.GetInstance(),
-					EmployeeSingletonRepository.GetInstance(),
-					new BaseParametersProvider(),
+					new OrderRepository(),
+					new EmployeeRepository(),
+					new BaseParametersProvider(_parametersProvider),
 					ServicesConfig.CommonServices.UserService,
 					SingletonErrorReporter.Instance);
 
 				var result = new List<IJournalPopupItem>();
+
+				if(_userHasOnlyAccessToWarehouseAndComplaints)
+				{
+					return result;
+				}
+				
 				result.Add(JournalPopupItemFactory.CreateNewAlwaysSensitiveAndVisible("Открыть трек",
 					(selectedItems) => {
 						var selectedNodes = selectedItems.Cast<RouteListsVMNode>();
@@ -340,29 +383,100 @@ namespace Vodovoz.ViewModel
 
 						using(var uowLocal = UnitOfWorkFactory.CreateWithoutRoot()) {
 							var routeLists = uowLocal.Session.QueryOver<RouteList>()
-							.Where(x => x.Id.IsIn(routeListIds))
-							.List();
+								.Where(x => x.Id.IsIn(routeListIds))
+								.List();
+							
+							bool needShowMessage = false;
+							var warehouseRepository = new WarehouseRepository();
+							List<LackStockNode> messageStockList = new List<LackStockNode>();
 
-							routeLists.Where((arg) => arg.Status == RouteListStatus.Confirmed).ToList().ForEach((routeList) => {
-								if(TDIMain.MainNotebook.FindTab(DialogHelper.GenerateDialogHashName<RouteList>(routeList.Id)) != null) {
-									MessageDialogHelper.RunInfoDialog("Требуется закрыть подчиненную вкладку");
-									isSlaveTabActive = true;
+							foreach (var routeList in routeLists)
+							{
+								var routeListParametersProvider = new RouteListParametersProvider(_parametersProvider);
+								int warehouseId = 0;
+								if (routeList.ClosingSubdivision.Id == routeListParametersProvider.CashSubdivisionSofiiskayaId)
+									warehouseId = routeListParametersProvider.WarehouseSofiiskayaId;
+								if (routeList.ClosingSubdivision.Id == routeListParametersProvider.CashSubdivisionParnasId)
+									warehouseId = routeListParametersProvider.WarehouseParnasId;
+
+								if (warehouseId > 0)
+								{
+									var onlineOrders = routeList.Addresses
+										.SelectMany(adressItem => adressItem.Order.OrderItems)
+										.Where(orderItem => orderItem.Nomenclature.OnlineStore != null);
+
+									var warehouseStocks = warehouseRepository
+										.GetWarehouseNomenclatureStock(UoW, warehouseId, onlineOrders.Select(o=>o.Nomenclature.Id).Distinct());
+									
+									var lackWarehouseStocks = onlineOrders
+										.Join(warehouseStocks,
+										o => o.Nomenclature.Id, 
+										w => w.NomenclatureId,
+										(o, w) => new LackStockNode() {NomenclatureId = o.Nomenclature.Id, OrderId = o.Order.Id,
+											NomenclatureName = o.Nomenclature.Name, Count = o.Count, Stock= w.Stock, Measure = o.Nomenclature.Unit.Name })
+										.Where(w=> w.Stock < w.Count);
+
+									messageStockList.AddRange(lackWarehouseStocks);
+
+									var notExistInWarehouseNomenclatures = onlineOrders
+										.Where(o => !warehouseStocks.Any(w => w.NomenclatureId == o.Nomenclature.Id))
+										.Select(o => new LackStockNode()
+										{
+											OrderId = o.Order.Id,
+											NomenclatureName = o.Nomenclature.Name,
+											Count = o.Count,
+											Measure = o.Nomenclature.Unit.Name
+										});
+
+									messageStockList.AddRange(notExistInWarehouseNomenclatures);
+								}
+							}
+
+							StringBuilder stockMessage = new StringBuilder();
+							
+							if (messageStockList.Count > 0)
+							{
+								needShowMessage = true;
+								stockMessage.Append($"В наличии нет следующих товаров:");
+
+								messageStockList.ForEach(messageItem =>
+								{
+									stockMessage.Append(Environment.NewLine);
+									stockMessage.Append($"Заказ {messageItem.OrderId}: {messageItem.NomenclatureName} - {messageItem.Count} {messageItem.Measure}");
+								});
+								
+								stockMessage.Append($"{Environment.NewLine}Всё равно отправить МЛ на погрузку?");
+							}
+
+							if (!needShowMessage || (needShowMessage && ServicesConfig.CommonServices.InteractiveService.Question(stockMessage.ToString())))
+							{
+								routeLists.Where((arg) => arg.Status == RouteListStatus.Confirmed).ToList().ForEach(
+									(routeList) =>
+									{
+										if (TDIMain.MainNotebook.FindTab(
+											DialogHelper.GenerateDialogHashName<RouteList>(routeList.Id)) != null)
+										{
+											MessageDialogHelper.RunInfoDialog("Требуется закрыть подчиненную вкладку");
+											isSlaveTabActive = true;
+											return;
+										}
+
+										foreach (var address in routeList.Addresses)
+										{
+											if (address.Order.OrderStatus < Domain.Orders.OrderStatus.OnLoading)
+												address.Order.ChangeStatusAndCreateTasks(
+													Domain.Orders.OrderStatus.OnLoading, callTaskWorker);
+										}
+
+										routeList.ChangeStatusAndCreateTask(RouteListStatus.InLoading, callTaskWorker);
+										uowLocal.Save(routeList);
+									});
+
+								if (isSlaveTabActive)
 									return;
-								}
 
-								foreach(var address in routeList.Addresses) {
-									if(address.Order.OrderStatus < Domain.Orders.OrderStatus.OnLoading)
-										address.Order.ChangeStatusAndCreateTasks(Domain.Orders.OrderStatus.OnLoading, callTaskWorker);
-								}
-
-								routeList.ChangeStatusAndCreateTask(RouteListStatus.InLoading, callTaskWorker);
-								uowLocal.Save(routeList);
-							});
-
-							if(isSlaveTabActive)
-								return;
-
-							uowLocal.Commit();
+								uowLocal.Commit();
+							}
 						}
 					},
 					(selectedItems) => selectedItems.Any((x) => (x as RouteListsVMNode).StatusEnum == RouteListStatus.Confirmed)
@@ -434,7 +548,16 @@ namespace Vodovoz.ViewModel
 								new RouteListAnalysisViewModel(
 									EntityUoWBuilder.ForOpen(selectedNode.Id),
 									UnitOfWorkFactory.GetDefaultFactory,
-									ServicesConfig.CommonServices
+									ServicesConfig.CommonServices,
+									new OrderSelectorFactory(),
+									new EmployeeJournalFactory(),
+									new CounterpartyJournalFactory(),
+									new DeliveryPointJournalFactory(), 
+									new SubdivisionJournalFactory(),
+									new GtkTabsOpener(),
+									new UndeliveredOrdersJournalOpener(),
+									new DeliveryShiftRepository(),
+									new UndeliveredOrdersRepository()
 								)
 							);
 					},
@@ -445,7 +568,7 @@ namespace Vodovoz.ViewModel
 					(selectedItems) => {
 						var selectedNodes = selectedItems.Cast<RouteListsVMNode>();
 						var selectedNode = selectedNodes.FirstOrDefault();
-						if(selectedNode != null && MileageCheckDlgStatuses.Contains(selectedNode.StatusEnum))
+						if(selectedNode != null && MileageCheckDlgStatuses.Contains(selectedNode.StatusEnum) && selectedNode.CarTypeOfUse != CarTypeOfUse.CompanyTruck)
 							MainClass.MainWin.TdiMain.OpenTab(
 								DialogHelper.GenerateDialogHashName<RouteList>(selectedNode.Id),
 								() => new RouteListMileageCheckDlg(selectedNode.Id)
@@ -453,7 +576,7 @@ namespace Vodovoz.ViewModel
 					},
 					(selectedItems) => selectedItems.Any(
 						x => MileageCheckDlgStatuses.Contains((x as RouteListsVMNode).StatusEnum)
-						&& (x as RouteListsVMNode).UsesCompanyCar
+						&& (x as RouteListsVMNode).UsesCompanyCar && ((RouteListsVMNode) x).CarTypeOfUse != CarTypeOfUse.CompanyTruck
 					)
 				));
 
@@ -506,10 +629,12 @@ namespace Vodovoz.ViewModel
 									() => new FuelDocumentViewModel(
 														RouteList, 
 														ServicesConfig.CommonServices, 
-														new SubdivisionRepository(), 
-														EmployeeSingletonRepository.GetInstance(), 
+														new SubdivisionRepository(_parametersProvider), 
+														new EmployeeRepository(), 
 														new FuelRepository(),
-														NavigationManagerProvider.NavigationManager
+														NavigationManagerProvider.NavigationManager,
+														new TrackRepository(),
+														new CategoryRepository(_parametersProvider)
 									)
 								);
 						}
@@ -520,7 +645,17 @@ namespace Vodovoz.ViewModel
 				return result;
 			}
 		}
-
+		
+		private class LackStockNode
+		{
+			public int NomenclatureId;
+			public int OrderId;
+			public string NomenclatureName;
+			public decimal Count;
+			public decimal Stock;
+			public string Measure;
+		}
+		
 		public new void Dispose()
 		{
 			NotifyConfiguration.Instance.UnsubscribeAll(this);

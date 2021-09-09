@@ -1,4 +1,5 @@
-﻿using System.Linq;
+﻿using System.Drawing;
+using System.Linq;
 using Gamma.GtkWidgets;
 using Gamma.Utilities;
 using Gdk;
@@ -19,31 +20,31 @@ using Vodovoz.Additions.Logistic;
 using Vodovoz.Domain.Logistic;
 using Vodovoz.Domain.Sale;
 using Vodovoz.Domain.WageCalculation;
-using Vodovoz.Repositories.Sale;
 using Vodovoz.ViewModels.Logistic;
 
 namespace Vodovoz.Views.Logistic
 {
 	public partial class DistrictsSetView : TabViewBase<DistrictsSetViewModel>
 	{
-		public DistrictsSetView(DistrictsSetViewModel viewModel) : base(viewModel)
+        private readonly GMapOverlay bordersOverlay = new GMapOverlay("district_borders");
+        private readonly GMapOverlay newBordersPreviewOverlay = new GMapOverlay("district_preview_borders");
+        private readonly GMapOverlay verticeOverlay = new GMapOverlay("district_vertice");
+        private readonly Pen selectedDistrictBorderPen = new Pen(System.Drawing.Color.Red, 2);
+
+        private const string acceptBeforeColumnTag = "Прием до";
+
+        public DistrictsSetView(DistrictsSetViewModel viewModel) : base(viewModel)
 		{
 			this.Build();
 			Configure();
-		}
+		}	
 		
-		private readonly GMapOverlay bordersOverlay = new GMapOverlay("district_borders");
-		private readonly GMapOverlay newBordersPreviewOverlay = new GMapOverlay("district_preview_borders");
-		private readonly GMapOverlay verticeOverlay = new GMapOverlay("district_vertice");
-
-		private const string acceptBeforeColumnTag = "Прием до";
-
 		private void Configure()
 		{
 			#region TreeViews
 
-			var colorRed = new Color(255, 0, 0);
-			var colorWhite = new Color(255, 255, 255);
+			var colorRed = new Gdk.Color(255, 0, 0);
+			var colorWhite = new Gdk.Color(255, 255, 255);
 
 			ytreeDistricts.ColumnsConfig = ColumnsConfigFactory.Create<District>()
 				.AddColumn("Код")
@@ -165,11 +166,14 @@ namespace Vodovoz.Views.Logistic
 			ytextComment.Binding.AddFuncBinding(ViewModel, vm => vm.CanEdit, w => w.Sensitive).InitializeFromSource();
 			
 			btnAddCommonRule.Binding.AddFuncBinding(ViewModel, vm => vm.SelectedDistrict != null && vm.CanEditDistrict, w => w.Sensitive).InitializeFromSource();
-			btnAddCommonRule.Clicked += (sender, args) => {
-				var selectRules = new OrmReference(ViewModel.UoW, DistrictRuleRepository.GetQueryOverWithAllDeliveryPriceRules()) {
+			btnAddCommonRule.Clicked += (sender, args) =>
+			{
+				var selectRules = new OrmReference(ViewModel.UoW, ViewModel.DistrictRuleRepository.GetQueryOverWithAllDeliveryPriceRules())
+				{
 					Mode = OrmReferenceMode.MultiSelect,
 					ButtonMode = QS.Project.Dialogs.ReferenceButtonMode.None
 				};
+				
 				selectRules.ObjectSelected +=
 					(o, e) => ViewModel.AddCommonDistrictRuleItemCommand.Execute(e.GetEntities<DeliveryPriceRule>());
 				Tab.TabParent.AddSlaveTab(this.Tab, selectRules);
@@ -243,11 +247,14 @@ namespace Vodovoz.Views.Logistic
 			btnRemoveAcceptBefore.Clicked += (sender, args) => ViewModel.RemoveAcceptBeforeCommand.Execute();
 			
 			btnAddWeekDayRule.Binding.AddFuncBinding(ViewModel, vm => vm.CanEditDistrict && vm.SelectedDistrict != null && vm.SelectedWeekDayName.HasValue, w => w.Sensitive).InitializeFromSource();
-			btnAddWeekDayRule.Clicked += (sender, args) => {
-				var selectRules = new OrmReference(ViewModel.UoW, DistrictRuleRepository.GetQueryOverWithAllDeliveryPriceRules()) {
+			btnAddWeekDayRule.Clicked += (sender, args) =>
+			{
+				var selectRules = new OrmReference(ViewModel.UoW, ViewModel.DistrictRuleRepository.GetQueryOverWithAllDeliveryPriceRules())
+				{
 					Mode = OrmReferenceMode.MultiSelect,
 					ButtonMode = QS.Project.Dialogs.ReferenceButtonMode.None
 				};
+				
 				selectRules.ObjectSelected += (o, e) =>
 					ViewModel.AddWeekDayDistrictRuleItemCommand.Execute(e.GetEntities<DeliveryPriceRule>());
 				Tab.TabParent.AddSlaveTab(this.Tab, selectRules);
@@ -316,8 +323,10 @@ namespace Vodovoz.Views.Logistic
 			};
 
 			cmbMapType.ItemsEnum = typeof(MapProviders);
-			cmbMapType.EnumItemSelected += (sender, args) => gmapWidget.MapProvider = MapProvidersHelper.GetPovider((MapProviders) args.SelectedItem);
-			cmbMapType.SelectedItem = MapProviders.YandexMap;
+			cmbMapType.TooltipText = "Если карта отображается некорректно или не отображается вовсе - смените тип карты";
+			cmbMapType.EnumItemSelected += (sender, args) =>
+				gmapWidget.MapProvider = MapProvidersHelper.GetPovider((MapProviders)args.SelectedItem);
+			cmbMapType.SelectedItem = MapProviders.GoogleMap;
 
 			gmapWidget.Position = new PointLatLng(59.93900, 30.31646);
 			gmapWidget.HeightRequest = 150;
@@ -326,6 +335,7 @@ namespace Vodovoz.Views.Logistic
 			gmapWidget.Overlays.Add(newBordersPreviewOverlay);
 			gmapWidget.Overlays.Add(verticeOverlay);
 			RefreshBorders();
+
 			gmapWidget.ButtonPressEvent += (o, args) => {
 				if(args.Event.Button == 1 && ViewModel.IsCreatingNewBorder) {
 					ViewModel.AddNewVertexCommand.Execute(gmapWidget.FromLocalToLatLng((int) args.Event.X, (int) args.Event.Y));
@@ -386,12 +396,11 @@ namespace Vodovoz.Views.Logistic
 							break;
 						case nameof(ViewModel.SelectedDistrictBorderVertices):
 							verticeOverlay.Clear();
-							if(ViewModel.SelectedDistrictBorderVertices != null) {
-								foreach (PointLatLng vertex in ViewModel.SelectedDistrictBorderVertices) {
-									GMapMarker point = new GMarkerGoogle(vertex, GMarkerGoogleType.blue);
-									verticeOverlay.Markers.Add(point);
-								}
-							}
+							if(ViewModel.SelectedDistrictBorderVertices != null){
+                                GMapPolygon polygon = new GMapPolygon(ViewModel.SelectedDistrictBorderVertices.ToList(), "polygon");
+                                polygon.Stroke = selectedDistrictBorderPen;
+                                verticeOverlay.Polygons.Add(polygon);
+                            }
 							break;
 						case nameof(ViewModel.NewBorderVertices):
 							verticeOverlay.Clear();

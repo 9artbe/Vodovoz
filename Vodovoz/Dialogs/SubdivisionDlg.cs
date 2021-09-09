@@ -11,9 +11,17 @@ using Vodovoz.Domain.Sale;
 using Vodovoz.Representations;
 using Vodovoz.ViewModel;
 using System;
+using QS.Project.Journal.EntitySelector;
+using Vodovoz.Domain.WageCalculation;
 using Vodovoz.ViewWidgets.Permissions;
 using Vodovoz.ViewModels.Permissions;
 using Vodovoz.EntityRepositories.Permissions;
+using Vodovoz.Journals.JournalViewModels.WageCalculation;
+using QS.Project.Services;
+using Vodovoz.TempAdapters;
+using QS.Project.Journal;
+using Vodovoz.EntityRepositories.Subdivisions;
+using Vodovoz.Parameters;
 
 namespace Vodovoz
 {
@@ -21,10 +29,9 @@ namespace Vodovoz
 	public partial class SubdivisionDlg : QS.Dialog.Gtk.EntityDialogBase<Subdivision>
 	{
 		private static Logger logger = LogManager.GetCurrentClassLogger();
+		private readonly ISubdivisionRepository _subdivisionRepository = new SubdivisionRepository(new ParametersProvider());
 		SubdivisionsVM subdivisionsVM;
 		PresetSubdivisionPermissionsViewModel presetPermissionVM;
-
-		public override bool HasChanges { get => true; set { } }
 
 		[Obsolete("Использовать Vodovoz.Views.Organization.SubdivisionView")]
 		public SubdivisionDlg()
@@ -77,7 +84,7 @@ namespace Vodovoz
 
 			lblWarehouses.LineWrapMode = Pango.WrapMode.Word;
 			if(Entity.Id > 0)
-				lblWarehouses.Text = Entity.GetWarehousesNames(UoW);
+				lblWarehouses.Text = Entity.GetWarehousesNames(UoW, _subdivisionRepository);
 			else
 				frmWarehoses.Visible = false;
 			vboxDocuments.Visible = QSMain.User.Admin;
@@ -86,6 +93,23 @@ namespace Vodovoz
 			vboxPresetPermissions.Add(new PresetPermissionsView(presetPermissionVM));
 			vboxPresetPermissions.ShowAll();
 			vboxPresetPermissions.Visible = QSMain.User.Admin;
+
+			presetPermissionVM.ObservablePermissionsList.ListContentChanged += (sender, e) => HasChanges = true;
+			Entity.ObservableDocumentTypes.ListContentChanged += (sender, e) => HasChanges = true;
+			subdivisionentitypermissionwidget.ViewModel.ObservableTypeOfEntitiesList.ListContentChanged += (sender, e) => HasChanges = true;
+
+			entryDefaultSalesPlan.SetEntityAutocompleteSelectorFactory(
+				new EntityAutocompleteSelectorFactory<SalesPlanJournalViewModel>(typeof(SalesPlan),
+					() => new SalesPlanJournalViewModel(
+						UnitOfWorkFactory.GetDefaultFactory,
+						ServicesConfig.CommonServices,
+						new NomenclatureSelectorFactory())
+					{
+						SelectionMode = JournalSelectionMode.Single
+					}
+			));
+			entryDefaultSalesPlan.Binding.AddBinding(Entity, s => s.DefaultSalesPlan, w => w.Subject).InitializeFromSource();
+			entryDefaultSalesPlan.CanEditReference = false;
 		}
 
 		void YSpecCmbGeographicGroup_ItemSelected(object sender, Gamma.Widgets.ItemSelectedEventArgs e)

@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using NHibernate.Criterion;
 using QS.DomainModel.UoW;
 using Vodovoz.Domain.Documents;
+using Vodovoz.Domain.Documents.DriverTerminal;
 using Vodovoz.Domain.Employees;
 using Vodovoz.Domain.Goods;
 using Vodovoz.Domain.Logistic;
@@ -21,6 +22,7 @@ namespace Vodovoz.EntityRepositories.Logistic
 		GoodsInRouteListResult GetTerminalInRL(IUnitOfWork uow, RouteList routeList, Warehouse warehouse);
 		IList<GoodsInRouteListResult> GetEquipmentsInRL(IUnitOfWork uow, RouteList routeList);
 		IList<GoodsInRouteListResult> AllGoodsLoaded(IUnitOfWork uow, RouteList routeList, CarLoadDocument excludeDoc = null);
+		IList<GoodsInRouteListResultToDivide> AllGoodsLoadedDivided(IUnitOfWork uow, RouteList routeList, CarLoadDocument excludeDoc = null);
 		IEnumerable<GoodsInRouteListResult> AllGoodsDelivered(IUnitOfWork uow, RouteList routeList);
 		IEnumerable<GoodsInRouteListResult> AllGoodsDelivered(IEnumerable<DeliveryDocument> deliveryDocuments);
 		IEnumerable<GoodsInRouteListResult> AllGoodsReceivedFromClient(IEnumerable<DeliveryDocument> deliveryDocuments);
@@ -30,15 +32,24 @@ namespace Vodovoz.EntityRepositories.Logistic
 		List<ReturnsNode> GetReturnsToWarehouse(IUnitOfWork uow, int routeListId, params int[] nomenclatureIds);
 		IEnumerable<CarLoadDocument> GetCarLoadDocuments(IUnitOfWork uow, int routelistId);
 		int BottlesUnloadedByCarUnloadedDocuments(IUnitOfWork uow, int emptyBottleId, int routeListId, params int[] exceptDocumentIds);
-		RouteList GetRouteListByOrder(IUnitOfWork uow, Domain.Orders.Order order);
+		RouteList GetActualRouteListByOrder(IUnitOfWork uow, Domain.Orders.Order order);
 		bool RouteListWasChanged(RouteList routeList);
-        IList<GoodsInRouteListResultWithSpecialRequirements> GetGoodsAndEquipsInRLWithSpecialRequirements(IUnitOfWork uow, RouteList routeList, ISubdivisionRepository subdivisionRepository = null, Warehouse warehouse = null);
-        /// <summary>
-        /// Проверяет необходимость погрузки терминала в МЛ
-        /// </summary>
-        /// <param name="uow">Unit Of Work</param>
-        /// <param name="routeListId">Идентификатор МЛ</param>
-        /// <returns></returns>
-        bool IsTerminalRequired(IUnitOfWork uow, int routeListId);
-    }
+		IList<GoodsInRouteListResultWithSpecialRequirements> GetGoodsAndEquipsInRLWithSpecialRequirements(IUnitOfWork uow, RouteList routeList, ISubdivisionRepository subdivisionRepository = null, Warehouse warehouse = null);
+		/// <summary>
+		/// Проверяет необходимость погрузки терминала в МЛ
+		/// </summary>
+		/// <param name="uow">Unit Of Work</param>
+		/// <param name="routeListId">Идентификатор МЛ</param>
+		/// <returns></returns>
+		bool IsTerminalRequired(IUnitOfWork uow, int routeListId);
+		decimal TerminalTransferedCountToRouteList(IUnitOfWork unitOfWork, RouteList routeList);
+		IList<DocumentPrintHistory> GetPrintsHistory(IUnitOfWork uow, RouteList routeList);
+		IEnumerable<int> GetDriverRouteListsIds(IUnitOfWork uow, Employee driver, RouteListStatus? status = null);
+		IList<RouteList> GetRouteListsByIds(IUnitOfWork uow, int[] routeListsIds);
+		RouteList GetRouteListById(IUnitOfWork uow, int routeListsId);
+		GoodsInRouteListResultWithSpecialRequirements GetTerminalInRLWithSpecialRequirements(IUnitOfWork uow, RouteList routeList,
+			Warehouse warehouse = null);
+		DriverAttachedTerminalDocumentBase GetLastTerminalDocumentForEmployee(IUnitOfWork uow, Employee employee);
+		IEnumerable<KeyValuePair<string, int>> GetDeliveryItemsToReturn(IUnitOfWork unitOfWork, int routeListsId);
+	}
 }

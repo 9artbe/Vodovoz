@@ -1,9 +1,11 @@
 ﻿using System;
 using System.Collections.Generic;
 using System.Linq;
+using QS.Commands;
 using QS.DomainModel.UoW;
 using QS.Project.Domain;
 using QS.Project.Journal.EntitySelector;
+using QS.Project.Services;
 using QS.Services;
 using QS.ViewModels;
 using Vodovoz.Domain.Client;
@@ -13,45 +15,82 @@ using Vodovoz.Domain.Orders;
 using Vodovoz.EntityRepositories;
 using Vodovoz.EntityRepositories.Goods;
 using Vodovoz.EntityRepositories.Subdivisions;
+using Vodovoz.EntityRepositories.Undeliveries;
 using Vodovoz.Infrastructure.Services;
+using Vodovoz.TempAdapters;
+using Vodovoz.ViewModels.Journals.JournalFactories;
+using Vodovoz.ViewModels.TempAdapters;
 
 namespace Vodovoz.ViewModels.Complaints
 {
 	public class CreateComplaintViewModel : EntityTabViewModelBase<Complaint>
 	{
-		private readonly IEntityAutocompleteSelectorFactory employeeSelectorFactory;
+		private readonly IEntityAutocompleteSelectorFactory _employeeSelectorFactory;
+        private readonly IFilePickerService _filePickerService;
+        private IList<ComplaintObject> _complaintObjectSource;
+        private ComplaintObject _complaintObject;
+        private readonly IList<ComplaintKind> _complaintKinds;
+        private DelegateCommand _changeDeliveryPointCommand;
 
 		public IEntityAutocompleteSelectorFactory CounterpartySelectorFactory { get; }
-		public IEntityAutocompleteSelectorFactory NomenclatureSelectorFactory { get; }
 		public IEmployeeService EmployeeService { get; }
 		public INomenclatureRepository NomenclatureRepository { get; }
 		public IUserRepository UserRepository { get; }
+		public bool UserHasOnlyAccessToWarehouseAndComplaints { get; }
 
 		public CreateComplaintViewModel(
-			IEntityUoWBuilder uowBuilder, 
+			IEntityUoWBuilder uowBuilder,
 			IUnitOfWorkFactory unitOfWorkFactory,
 			IEmployeeService employeeService,
-			IEntityAutocompleteSelectorFactory employeeSelectorFactory,
 			IEntityAutocompleteSelectorFactory counterpartySelectorFactory,
 			ISubdivisionRepository subdivisionRepository,
 			ICommonServices commonServices,
-			IEntityAutocompleteSelectorFactory nomenclatureSelectorFactory,
 			INomenclatureRepository nomenclatureRepository,
 			IUserRepository userRepository,
+            IFilePickerService filePickerService,
+			IOrderSelectorFactory orderSelectorFactory,
+			IEmployeeJournalFactory employeeJournalFactory,
+			ICounterpartyJournalFactory counterpartyJournalFactory,
+			IDeliveryPointJournalFactory deliveryPointJournalFactory,
+			ISubdivisionJournalFactory subdivisionJournalFactory,
+			IGtkTabsOpener gtkDialogsOpener,
+			IUndeliveredOrdersJournalOpener undeliveredOrdersJournalOpener,
+			INomenclatureSelectorFactory nomenclatureSelector,
+			IUndeliveredOrdersRepository undeliveredOrdersRepository,
 			string phone = null
-			) : base(uowBuilder, unitOfWorkFactory, commonServices)
+		) : base(uowBuilder, unitOfWorkFactory, commonServices)
 		{
-			this.employeeSelectorFactory = employeeSelectorFactory ?? throw new ArgumentNullException(nameof(employeeSelectorFactory));
-			EmployeeService = employeeService ?? throw new ArgumentNullException(nameof(employeeService));
+            _filePickerService = filePickerService ?? throw new ArgumentNullException(nameof(filePickerService));
+            EmployeeService = employeeService ?? throw new ArgumentNullException(nameof(employeeService));
 			NomenclatureRepository = nomenclatureRepository ?? throw new ArgumentNullException(nameof(nomenclatureRepository));
 			UserRepository = userRepository ?? throw new ArgumentNullException(nameof(userRepository));
 			CounterpartySelectorFactory = counterpartySelectorFactory ?? throw new ArgumentNullException(nameof(counterpartySelectorFactory));
-			NomenclatureSelectorFactory = nomenclatureSelectorFactory ?? throw new ArgumentNullException(nameof(nomenclatureSelectorFactory));
 			this.subdivisionRepository = subdivisionRepository ?? throw new ArgumentNullException(nameof(subdivisionRepository));
+
+			OrderSelectorFactory = orderSelectorFactory ?? throw new ArgumentNullException(nameof(orderSelectorFactory));
+			EmployeeJournalFactory = employeeJournalFactory ?? throw new ArgumentNullException(nameof(employeeJournalFactory));
+			_employeeSelectorFactory = employeeJournalFactory.CreateEmployeeAutocompleteSelectorFactory();
+			CounterpartyJournalFactory = counterpartyJournalFactory ?? throw new ArgumentNullException(nameof(counterpartyJournalFactory));
+			DeliveryPointJournalFactory = deliveryPointJournalFactory ?? throw new ArgumentNullException(nameof(deliveryPointJournalFactory));
+			SubdivisionJournalFactory = subdivisionJournalFactory ?? throw new ArgumentNullException(nameof(subdivisionJournalFactory));
+			GtkDialogsOpener = gtkDialogsOpener ?? throw new ArgumentNullException(nameof(gtkDialogsOpener));
+			UndeliveredOrdersJournalOpener =
+				undeliveredOrdersJournalOpener ?? throw new ArgumentNullException(nameof(undeliveredOrdersJournalOpener));
+			NomenclatureSelector = nomenclatureSelector ?? throw new ArgumentNullException(nameof(nomenclatureSelector));
+			UndeliveredOrdersRepository =
+				undeliveredOrdersRepository ?? throw new ArgumentNullException(nameof(undeliveredOrdersRepository));
+
 			Entity.ComplaintType = ComplaintType.Client;
 			Entity.SetStatus(ComplaintStatuses.Checking);
 			ConfigureEntityPropertyChanges();
 			Entity.Phone = phone;
+
+			_complaintKinds = complaintKindSource = UoW.GetAll<ComplaintKind>().Where(k => !k.IsArchive).ToList();
+
+			UserHasOnlyAccessToWarehouseAndComplaints =
+				ServicesConfig.CommonServices.CurrentPermissionService.ValidatePresetPermission("user_have_access_only_to_warehouse_and_complaints")
+			    && !ServicesConfig.CommonServices.UserService.GetCurrentUser(UoW).IsAdmin;
+
 			TabName = "Новая клиентская рекламация";
 		}
 
@@ -59,36 +98,59 @@ namespace Vodovoz.ViewModels.Complaints
 			IEntityUoWBuilder uowBuilder,
 			IUnitOfWorkFactory unitOfWorkFactory,
 			IEmployeeService employeeService,
-			IEntityAutocompleteSelectorFactory employeeSelectorFactory,
 			IEntityAutocompleteSelectorFactory counterpartySelectorFactory,
 			ISubdivisionRepository subdivisionRepository,
 			ICommonServices commonServices,
-			IEntityAutocompleteSelectorFactory nomenclatureSelectorFactory,
 			INomenclatureRepository nomenclatureRepository,
 			IUserRepository userRepository,
-			string phone = null) : this(uowBuilder,unitOfWorkFactory,employeeService,employeeSelectorFactory,counterpartySelectorFactory,subdivisionRepository,commonServices,nomenclatureSelectorFactory,nomenclatureRepository,userRepository,phone)
+            IFilePickerService filePickerService,
+			IOrderSelectorFactory orderSelectorFactory,
+			IEmployeeJournalFactory employeeJournalFactory,
+			ICounterpartyJournalFactory counterpartyJournalFactory,
+			IDeliveryPointJournalFactory deliveryPointJournalFactory,
+			ISubdivisionJournalFactory subdivisionJournalFactory,
+			IGtkTabsOpener gtkDialogsOpener,
+			IUndeliveredOrdersJournalOpener undeliveredOrdersJournalOpener,
+			INomenclatureSelectorFactory nomenclatureSelector,
+			IUndeliveredOrdersRepository undeliveredOrdersRepository,
+			string phone = null) : this(uowBuilder, unitOfWorkFactory, employeeService, counterpartySelectorFactory,
+			subdivisionRepository, commonServices, nomenclatureRepository, userRepository, filePickerService,
+			orderSelectorFactory, employeeJournalFactory, counterpartyJournalFactory, deliveryPointJournalFactory, subdivisionJournalFactory,
+			gtkDialogsOpener, undeliveredOrdersJournalOpener, nomenclatureSelector, undeliveredOrdersRepository,
+			phone)
 		{
-			Counterparty _client = UoW.GetById<Counterparty>(client.Id);
-			Entity.Counterparty = _client;
+			var currentClient = UoW.GetById<Counterparty>(client.Id);
+			Entity.Counterparty = currentClient;
 			Entity.Phone = phone;
 		}
-		
+
 		public CreateComplaintViewModel(Order order,
 			IEntityUoWBuilder uowBuilder,
 			IUnitOfWorkFactory unitOfWorkFactory,
 			IEmployeeService employeeService,
-			IEntityAutocompleteSelectorFactory employeeSelectorFactory,
 			IEntityAutocompleteSelectorFactory counterpartySelectorFactory,
 			ISubdivisionRepository subdivisionRepository,
 			ICommonServices commonServices,
-			IEntityAutocompleteSelectorFactory nomenclatureSelectorFactory,
 			INomenclatureRepository nomenclatureRepository,
 			IUserRepository userRepository,
-			string phone = null) : this(uowBuilder,unitOfWorkFactory,employeeService,employeeSelectorFactory,counterpartySelectorFactory,subdivisionRepository,commonServices,nomenclatureSelectorFactory,nomenclatureRepository,userRepository,phone)
+            IFilePickerService filePickerService,
+			IOrderSelectorFactory orderSelectorFactory,
+			IEmployeeJournalFactory employeeJournalFactory,
+			ICounterpartyJournalFactory counterpartyJournalFactory,
+			IDeliveryPointJournalFactory deliveryPointJournalFactory,
+			ISubdivisionJournalFactory subdivisionJournalFactory,
+			IGtkTabsOpener gtkDialogsOpener,
+			IUndeliveredOrdersJournalOpener undeliveredOrdersJournalOpener,
+			INomenclatureSelectorFactory nomenclatureSelector,
+			IUndeliveredOrdersRepository undeliveredOrdersRepository,
+			string phone = null) : this(uowBuilder, unitOfWorkFactory, employeeService, counterpartySelectorFactory, subdivisionRepository,
+			commonServices, nomenclatureRepository, userRepository, filePickerService, orderSelectorFactory,
+			employeeJournalFactory, counterpartyJournalFactory, deliveryPointJournalFactory, subdivisionJournalFactory, gtkDialogsOpener,
+			undeliveredOrdersJournalOpener, nomenclatureSelector, undeliveredOrdersRepository, phone)
 		{
-			Order _order = UoW.GetById<Order>(order.Id);
-			Entity.Order = _order;
-			Entity.Counterparty = _order.Client;
+			var currentOrder = UoW.GetById<Order>(order.Id);
+			Entity.Order = currentOrder;
+			Entity.Counterparty = currentOrder.Client;
 			Entity.Phone = phone;
 		}
 
@@ -102,8 +164,21 @@ namespace Vodovoz.ViewModels.Complaints
 			}
 		}
 
-		//так как диалог только для создания рекламации
-		public bool CanEdit => PermissionResult.CanCreate;
+        private ComplaintFilesViewModel filesViewModel;
+        public ComplaintFilesViewModel FilesViewModel
+        {
+            get
+            {
+                if (filesViewModel == null)
+                {
+                    filesViewModel = new ComplaintFilesViewModel(Entity, UoW, _filePickerService, CommonServices, UserRepository);
+                }
+                return filesViewModel;
+            }
+        }
+
+        //так как диалог только для создания рекламации
+        public bool CanEdit => PermissionResult.CanCreate;
 
 		public bool CanSelectDeliveryPoint => Entity.Counterparty != null;
 
@@ -119,23 +194,32 @@ namespace Vodovoz.ViewModels.Complaints
 			}
 		}
 
-		List<ComplaintKind> complaintKindSource;
-		public IEnumerable<ComplaintKind> ComplaintKindSource {
-			get {
-				if(complaintKindSource == null)
-					complaintKindSource = UoW.GetAll<ComplaintKind>().Where(k => !k.IsArchive).ToList();
-				if(Entity.ComplaintKind != null && Entity.ComplaintKind.IsArchive)
-					complaintKindSource.Add(UoW.GetById<ComplaintKind>(Entity.ComplaintKind.Id));
+		IList<ComplaintKind> complaintKindSource;
+		public IList<ComplaintKind> ComplaintKindSource {
+			get => complaintKindSource;
+			set => SetField(ref complaintKindSource, value);
+		}
 
-				return complaintKindSource;
+		public virtual ComplaintObject ComplaintObject
+		{
+			get => _complaintObject;
+			set
+			{
+				if(SetField(ref _complaintObject, value))
+				{
+					ComplaintKindSource = value == null ? _complaintKinds : _complaintKinds.Where(x => x.ComplaintObject == value).ToList();
+				}
 			}
 		}
+
+		public IEnumerable<ComplaintObject> ComplaintObjectSource =>
+			_complaintObjectSource ?? (_complaintObjectSource = UoW.GetAll<ComplaintObject>().Where(x => !x.IsArchive).ToList());
 
 		private GuiltyItemsViewModel guiltyItemsViewModel;
 		public GuiltyItemsViewModel GuiltyItemsViewModel {
 			get {
 				if(guiltyItemsViewModel == null) {
-					guiltyItemsViewModel = new GuiltyItemsViewModel(Entity, UoW, CommonServices, subdivisionRepository, employeeSelectorFactory);
+					guiltyItemsViewModel = new GuiltyItemsViewModel(Entity, UoW, CommonServices, subdivisionRepository, _employeeSelectorFactory);
 				}
 
 				return guiltyItemsViewModel;
@@ -162,5 +246,50 @@ namespace Vodovoz.ViewModels.Complaints
 				() => CanSelectDeliveryPoint
 			);
 		}
+
+        public void CheckAndSave()
+        {
+            if (!HasСounterpartyDuplicateToday() ||
+                CommonServices.InteractiveService.Question("Рекламация с данным контрагентом уже создавалась сегодня, создать ещё одну?"))
+            {
+                SaveAndClose();
+            }
+        }
+
+        private bool HasСounterpartyDuplicateToday()
+        {
+	        if(Entity.Counterparty == null) {
+		        return false;
+	        }
+	        return UoW.Session.QueryOver<Complaint>()
+		        .Where(i => i.Counterparty.Id == Entity.Counterparty.Id)
+		        .And(i => i.CreationDate >= DateTime.Now.AddDays(-1))
+		        .RowCount() > 0;
+        }
+
+        #region ChangeDeliveryPointCommand
+
+        public DelegateCommand ChangeDeliveryPointCommand => _changeDeliveryPointCommand ?? (_changeDeliveryPointCommand =
+	        new DelegateCommand(() =>
+		        {
+			        if(Entity.Order?.DeliveryPoint != null)
+			        {
+				        Entity.DeliveryPoint = Entity.Order.DeliveryPoint;
+			        }
+		        },
+		        () => true
+	        ));
+
+        #endregion ChangeDeliveryPointCommand
+
+		public IOrderSelectorFactory OrderSelectorFactory { get; }
+        public IEmployeeJournalFactory EmployeeJournalFactory { get; }
+        public ICounterpartyJournalFactory CounterpartyJournalFactory { get; }
+        public IDeliveryPointJournalFactory DeliveryPointJournalFactory { get; }
+        public ISubdivisionJournalFactory SubdivisionJournalFactory { get; }
+        public IGtkTabsOpener GtkDialogsOpener { get; }
+        public IUndeliveredOrdersJournalOpener UndeliveredOrdersJournalOpener { get; }
+		public INomenclatureSelectorFactory NomenclatureSelector { get; }
+		public IUndeliveredOrdersRepository UndeliveredOrdersRepository { get; }
 	}
 }

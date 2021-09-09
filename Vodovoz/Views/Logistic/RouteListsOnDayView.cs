@@ -9,7 +9,6 @@ using GMap.NET.GtkSharp;
 using GMap.NET.MapProviders;
 using Gtk;
 using QS.Dialog.GtkUI;
-using QS.DomainModel.UoW;
 using QS.Utilities;
 using QS.Views.GtkUI;
 using QSOrmProject;
@@ -17,13 +16,13 @@ using QSWidgetLib;
 using Vodovoz.Additions.Logistic;
 using Vodovoz.Dialogs.Logistic;
 using Vodovoz.Domain.Logistic;
-using Vodovoz.Repositories.Sale;
 using Vodovoz.ViewModels.Logistic;
 using Order = Vodovoz.Domain.Orders.Order;
 using Vodovoz.EntityRepositories.Orders;
 using Vodovoz.Domain.Sale;
 using Vodovoz.Domain.Employees;
 using System.Drawing;
+using Vodovoz.Domain.Orders;
 
 namespace Vodovoz.Views.Logistic
 {
@@ -67,7 +66,7 @@ namespace Vodovoz.Views.Logistic
 
 			//Configure map
 			districtsOverlay.IsVisibile = false;
-			gmapWidget.MapProvider = GMapProviders.YandexMap;
+			gmapWidget.MapProvider = GMapProviders.GoogleMap;
 			gmapWidget.Position = new PointLatLng(59.93900, 30.31646);
 			gmapWidget.HeightRequest = 150;
 			gmapWidget.HasFrame = true;
@@ -84,8 +83,10 @@ namespace Vodovoz.Views.Logistic
 			gmapWidget.MotionNotifyEvent += GmapWidget_MotionNotifyEvent;
 
 			yenumcomboMapType.ItemsEnum = typeof(MapProviders);
-			yenumcomboMapType.SelectedItem = MapProviders.YandexMap;
-			yenumcomboMapType.EnumItemSelected += (sender, e) => gmapWidget.MapProvider = MapProvidersHelper.GetPovider((MapProviders)yenumcomboMapType.SelectedItem);
+			yenumcomboMapType.TooltipText = "Если карта отображается некорректно или не отображается вовсе - смените тип карты";
+			yenumcomboMapType.EnumItemSelected += (sender, args) =>
+				gmapWidget.MapProvider = MapProvidersHelper.GetPovider((MapProviders)args.SelectedItem);
+			yenumcomboMapType.SelectedItem = MapProviders.GoogleMap;
 
 			LoadDistrictsGeometry();
 
@@ -124,7 +125,7 @@ namespace Vodovoz.Views.Logistic
 					.AddColumn("Автомобиль").AddPixbufRenderer(x => x.Car != null && x.Car.IsCompanyCar ? vodovozCarIcon : null)
 						.AddTextRenderer(x => x.Car != null ? x.Car.RegistrationNumber : "нет")
 					.AddColumn("База").AddComboRenderer(x => x.GeographicGroup).SetDisplayFunc(x => x.Name)
-						.FillItems(GeographicGroupRepository.GeographicGroupsWithCoordinates(ViewModel.UoW))
+						.FillItems(ViewModel.GeographicGroupRepository.GeographicGroupsWithCoordinates(ViewModel.UoW))
 						.AddSetter(
 							(c, n) => {
 								c.Editable = n.Car != null;
@@ -139,11 +140,11 @@ namespace Vodovoz.Views.Logistic
 			ytreeviewOnDayDrivers.Selection.Changed += (sender, e) => ViewModel.SelectedDrivers = ytreeviewOnDayDrivers.GetSelectedObjects<AtWorkDriver>().ToArray();
 			ytreeviewOnDayDrivers.Binding.AddBinding(ViewModel, vm => vm.ObservableDriversOnDay, w => w.ItemsDataSource).InitializeFromSource();
 
-			ytreeviewAddressesTypes.ColumnsConfig = FluentColumnsConfig<AddressTypeNode>.Create()
+			ytreeviewAddressesTypes.ColumnsConfig = FluentColumnsConfig<OrderAddressTypeNode>.Create()
 				.AddColumn("").AddToggleRenderer(x => x.Selected)
 				.AddColumn("Тип адресов").AddTextRenderer(x => x.Title)
 				.Finish();
-			ytreeviewAddressesTypes.ItemsDataSource = ViewModel.AddressTypes;
+			ytreeviewAddressesTypes.ItemsDataSource = ViewModel.OrderAddressTypes;
 
 
 			buttonAddDriver.Clicked += (sender, e) => ViewModel.AddDriverCommand.Execute();
@@ -229,8 +230,16 @@ namespace Vodovoz.Views.Logistic
 			enumCmbDeliveryType.ItemsEnum = typeof(DeliveryScheduleFilterType);
 			enumCmbDeliveryType.Binding.AddBinding(ViewModel, vm => vm.DeliveryScheduleType, w => w.SelectedItem).InitializeFromSource();
 			enumCmbDeliveryType.ChangedByUser += (sender, e) => FillItems();
+			
+			ytextWorkDriversInfo.Binding.AddBinding(ViewModel, vm => vm.CanTake, w => w.Buffer.Text).InitializeFromSource(); 
+			viewDeliverySummary.ColumnsConfig = FluentColumnsConfig<DeliverySummary>
+				.Create()
+				.AddColumn("Статус").AddTextRenderer(x => x.Name)
+				.AddColumn("Адреса").AddTextRenderer(x=>x.AddressCount.ToString()).XAlign(0.5f)
+				.AddColumn("Бутыли").AddTextRenderer(x=>x.Bottles.ToString("N0")).XAlign(0.5f)
+				.Finish();
 
-			ytextWorkDriversInfo.Binding.AddBinding(ViewModel, vm => vm.CanTake, w => w.Buffer.Text).InitializeFromSource();
+			viewDeliverySummary.Binding.AddBinding(ViewModel, vm => vm.ObservableDeliverySummary, w => w.ItemsDataSource).InitializeFromSource();
 		}
 
 		void GmapWidget_ButtonReleaseEvent(object o, ButtonReleaseEventArgs args)
@@ -446,7 +455,8 @@ namespace Vodovoz.Views.Logistic
 		{
 			addressesOverlay.Clear();
 			TurnOffCheckShowOnlyDriverOrders();
-
+			
+			
 			logger.Info("Загружаем заказы на {0:d}...", ViewModel.DateForRouting);
 			ViewModel.InitializeData();
 			UpdateRoutesPixBuf();
@@ -467,12 +477,12 @@ namespace Vodovoz.Views.Logistic
 			addressesOverlay.Clear();
 
 			//добавляем маркеры складов
-			foreach(var b in GeographicGroupRepository.GeographicGroupsWithCoordinates(ViewModel.UoW)) {
+			foreach(var b in ViewModel.GeographicGroupRepository.GeographicGroupsWithCoordinates(ViewModel.UoW)) {
 				addressesOverlay.Markers.Add(FillBaseMarker(b));
 			}
 
 			var ordersOnDay = ViewModel.OrdersOnDay;
-			var ordersRouteLists = OrderSingletonRepository.GetInstance().GetAllRouteListsForOrders(ViewModel.UoW, ordersOnDay);
+			var ordersRouteLists = ViewModel.OrderRepository.GetAllRouteListsForOrders(ViewModel.UoW, ordersOnDay);
 			//добавляем маркеры адресов заказов
 			foreach(var order in ordersOnDay) {
 				totalBottlesCountAtDay += order.Total19LBottlesToDeliver;
@@ -489,9 +499,17 @@ namespace Vodovoz.Views.Logistic
 					bottlesWithoutRL += order.Total19LBottlesToDeliver;
 				}
 
-				if(order.DeliveryPoint.Latitude.HasValue && order.DeliveryPoint.Longitude.HasValue) {
+				if(order.DeliveryPoint.Latitude.HasValue && order.DeliveryPoint.Longitude.HasValue)
+				{
+					bool overdueOrder = false;
+					var undeliveryOrderNodes = ViewModel.UndeliveredOrdersOnDay.Where(x =>
+						x.GuiltySide == GuiltyTypes.Driver || x.GuiltySide == GuiltyTypes.Department);
+					if(undeliveryOrderNodes.Any(x => x.NewOrderId == order.Id))
+					{
+						overdueOrder = true;
+					}
 
-					FillTypeAndShapeMarker(order, route, orderRls, out PointMarkerShape shape, out PointMarkerType type);
+					FillTypeAndShapeMarker(order, route, orderRls, out PointMarkerShape shape, out PointMarkerType type, overdueOrder);
 
 					if(selectedMarkers.FirstOrDefault(m => (m.Tag as Order)?.Id == order.Id) != null)
 						type = PointMarkerType.white;
@@ -503,14 +521,14 @@ namespace Vodovoz.Views.Logistic
 				else
 					addressesWithoutCoordinats++;
 			}
-
+			
 			UpdateOrdersInfo();
 			logger.Info("Ок.");
 		}
 
-		private void FillTypeAndShapeMarker(Order order, RouteList route, IEnumerable<int> orderRlsIds, out PointMarkerShape shape, out PointMarkerType type)
+		private void FillTypeAndShapeMarker(Order order, RouteList route, IEnumerable<int> orderRlsIds, out PointMarkerShape shape, out PointMarkerType type, bool overdueOrder = false)
 		{
-			shape = ViewModel.GetMarkerShapeFromBottleQuantity(order.Total19LBottlesToDeliver);
+			shape = ViewModel.GetMarkerShapeFromBottleQuantity(order.Total19LBottlesToDeliver, overdueOrder);
 			type = PointMarkerType.black;
 
 			if(!orderRlsIds.Any()) {
@@ -711,7 +729,7 @@ namespace Vodovoz.Views.Logistic
 		{
 			logger.Info("Загружаем районы...");
 			districtsOverlay.Clear();
-			ViewModel.LogisticanDistricts = ScheduleRestrictionRepository.GetDistrictsWithBorder(ViewModel.UoW);
+			ViewModel.LogisticanDistricts = ViewModel.ScheduleRestrictionRepository.GetDistrictsWithBorder(ViewModel.UoW);
 			foreach(var district in ViewModel.LogisticanDistricts) {
 				var poligon = new GMapPolygon(
 					district.DistrictBorder.Coordinates.Select(p => new PointLatLng(p.X, p.Y)).ToList(),
@@ -779,7 +797,7 @@ namespace Vodovoz.Views.Logistic
 		{
 			driverAddressesOverlay.Clear();
 
-			foreach(var b in GeographicGroupRepository.GeographicGroupsWithCoordinates(ViewModel.UoW)) {
+			foreach(var b in ViewModel.GeographicGroupRepository.GeographicGroupsWithCoordinates(ViewModel.UoW)) {
 				driverAddressesOverlay.Markers.Add(FillBaseMarker(b));
 			}
 
@@ -810,8 +828,9 @@ namespace Vodovoz.Views.Logistic
 				return;
 			}
 
-			var ordersOnDay = ViewModel.OrdersOnDay.Select(x => x).Where(x => !x.IsService).ToList();
-			var ordersRouteLists = OrderSingletonRepository.GetInstance().GetAllRouteListsForOrders(ViewModel.UoW, ordersOnDay);
+			var ordersOnDay = ViewModel.OrdersOnDay.Select(x => x)
+				.Where(x => x.OrderAddressType != OrderAddressType.Service).ToList();
+			var ordersRouteLists = ViewModel.OrderRepository.GetAllRouteListsForOrders(ViewModel.UoW, ordersOnDay);
 
 			//добавляем маркеры нераспределенных заказов из районов водителя
 			foreach(var order in ordersOnDay) {
@@ -860,7 +879,7 @@ namespace Vodovoz.Views.Logistic
 		{
 			var SelectDriverCar = new OrmReference(
 				ViewModel.UoW,
-				Repository.Logistics.CarRepository.ActiveCompanyCarsQuery()
+				ViewModel.CarRepository.ActiveCompanyCarsQuery()
 			);
 			var driver = ytreeviewOnDayDrivers.GetSelectedObjects<AtWorkDriver>().First();
 			SelectDriverCar.Tag = driver;

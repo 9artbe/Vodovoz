@@ -8,7 +8,6 @@ using QS.Dialog.GtkUI;
 using QS.DomainModel.UoW;
 using QS.Validation;
 using Vodovoz.Domain.Logistic;
-using Vodovoz.Repository.Logistics;
 using Vodovoz.ViewModel;
 using QS.Project.Services;
 using QS.Dialog;
@@ -22,10 +21,11 @@ using Vodovoz.Core.DataService;
 using Vodovoz.EntityRepositories.Employees;
 using Vodovoz.Tools;
 using Vodovoz.JournalViewModels;
-using QS.Osm;
-using QS.Osm.Osrm;
 using Vodovoz.Domain.Employees;
+using Vodovoz.Domain.WageCalculation.CalculationServices.RouteList;
+using Vodovoz.EntityRepositories.WageCalculation;
 using Vodovoz.Infrastructure.Converters;
+using Vodovoz.Parameters;
 
 namespace Vodovoz
 {
@@ -33,6 +33,8 @@ namespace Vodovoz
 	{
 		#region Поля
 
+		private readonly IDeliveryShiftRepository _deliveryShiftRepository = new DeliveryShiftRepository();
+		private readonly ITrackRepository _trackRepository = new TrackRepository();
 		bool editing = true;
 
 		List<RouteListKeepingItemNode> items;
@@ -42,11 +44,14 @@ namespace Vodovoz
 			callTaskWorker ?? (callTaskWorker = new CallTaskWorker(
 				CallTaskSingletonFactory.GetInstance(),
 				new CallTaskRepository(),
-				OrderSingletonRepository.GetInstance(),
-				EmployeeSingletonRepository.GetInstance(),
-				new BaseParametersProvider(),
+				new OrderRepository(),
+				new EmployeeRepository(),
+				new BaseParametersProvider(new ParametersProvider()),
 				ServicesConfig.CommonServices.UserService,
 				SingletonErrorReporter.Instance));
+
+		private readonly WageParameterService _wageParameterService =
+			new WageParameterService(new WageCalculationRepository(), new BaseParametersProvider(new ParametersProvider()));
 
 		#endregion
 
@@ -66,7 +71,6 @@ namespace Vodovoz
 
 		public void ConfigureDlg()
 		{
-			HasChanges = true;
 			if(!editing) {
 				MessageDialogHelper.RunWarningDialog("Не достаточно прав. Обратитесь к руководителю.");
 				HasChanges = false;
@@ -80,14 +84,16 @@ namespace Vodovoz
 			entityviewmodelentryCar.Binding.AddBinding(Entity, e => e.Car, w => w.Subject).InitializeFromSource();
 			entityviewmodelentryCar.CompletionPopupSetWidth(false);
 
+			referenceDriver.RepresentationModel = new EmployeesVM();
 			referenceDriver.Binding.AddBinding(Entity, rl => rl.Driver, widget => widget.Subject).InitializeFromSource();
 
+			referenceForwarder.RepresentationModel = new EmployeesVM();
 			referenceForwarder.Binding.AddBinding(Entity, rl => rl.Forwarder, widget => widget.Subject).InitializeFromSource();
 		
 			referenceLogistican.RepresentationModel = new EmployeesVM();
 			referenceLogistican.Binding.AddBinding(Entity, rl => rl.Logistician, widget => widget.Subject).InitializeFromSource();
 
-			speccomboShift.ItemsList = DeliveryShiftRepository.ActiveShifts(UoWGeneric);
+			speccomboShift.ItemsList = _deliveryShiftRepository.ActiveShifts(UoWGeneric);
 			speccomboShift.Binding.AddBinding(Entity, rl => rl.Shift, widget => widget.SelectedItem).InitializeFromSource();
 
 			datePickerDate.Binding.AddBinding(Entity, rl => rl.Date, widget => widget.Date).InitializeFromSource();
@@ -131,7 +137,7 @@ namespace Vodovoz
 				vboxRouteList.Sensitive = table2.Sensitive = false;
 			}
 			else
-				RecountMileage();
+				Entity.RecountMileage();
 
 			//Телефон
 			phoneLogistican.MangoManager = phoneDriver.MangoManager = phoneForwarder.MangoManager = MainClass.MainWin.MangoManager;
@@ -146,6 +152,14 @@ namespace Vodovoz
 
 		public override bool Save()
 		{
+			var validationContext = new Dictionary<object, object> {
+				{ nameof(IRouteListItemRepository), new EntityRepositories.Logistic.RouteListItemRepository() }
+			};
+			var valid = new QSValidator<RouteList>(Entity, validationContext);
+			if(valid.RunDlgIfNotValid((Window)this.Toplevel)) {
+				return false;
+			}
+		
 			if(Entity.Status > RouteListStatus.OnClosing) {
 				if(Entity.FuelOperationHaveDiscrepancy()) {
 					if(!MessageDialogHelper.RunQuestionDialog("Был изменен водитель или автомобиль, при сохранении МЛ баланс по топливу изменится с учетом этих изменений. Продолжить сохранение?")) {
@@ -156,8 +170,9 @@ namespace Vodovoz
 			}
 			
 			if(Entity.Status == RouteListStatus.Delivered) {
-				Entity.ChangeStatusAndCreateTask(RouteListStatus.MileageCheck, CallTaskWorker);
+				Entity.ChangeStatusAndCreateTask(Entity.Car.IsCompanyCar && Entity.Car.TypeOfUse != CarTypeOfUse.CompanyTruck ? RouteListStatus.MileageCheck : RouteListStatus.OnClosing, CallTaskWorker);
 			}
+			Entity.CalculateWages(_wageParameterService);
 
 			UoWGeneric.Save();
 
@@ -179,7 +194,7 @@ namespace Vodovoz
 			}
 
 			if(Entity.Status == RouteListStatus.Delivered) {
-				Entity.ChangeStatusAndCreateTask(RouteListStatus.MileageCheck, CallTaskWorker);
+				Entity.ChangeStatusAndCreateTask(Entity.Car.IsCompanyCar && Entity.Car.TypeOfUse != CarTypeOfUse.CompanyTruck ? RouteListStatus.MileageCheck : RouteListStatus.OnClosing, CallTaskWorker);
 			}
 			Entity.AcceptMileage(CallTaskWorker);
 
@@ -200,7 +215,7 @@ namespace Vodovoz
 
 		protected void OnButtonFromTrackClicked(object sender, EventArgs e)
 		{
-			var track = TrackRepository.GetTrackForRouteList(UoW, Entity.Id);
+			var track = _trackRepository.GetTrackByRouteListId(UoW, Entity.Id);
 			if(track == null) {
 				ServicesConfig.InteractiveService.ShowMessage(ImportanceLevel.Warning, "Невозможно расчитать растояние, так как в маршрутном листе нет трека", "");
 				return;
@@ -229,48 +244,6 @@ namespace Vodovoz
         }
         
         #endregion
-
-		private void RecountMileage()
-		{
-			var pointsToRecalculate = new List<PointOnEarth>();
-			var pointsToBase = new List<PointOnEarth>();
-			var baseLat = (double)Entity.GeographicGroups.FirstOrDefault().BaseLatitude.Value;
-			var baseLon = (double)Entity.GeographicGroups.FirstOrDefault().BaseLongitude.Value;
-
-			decimal totalDistanceTrack = 0;
-
-			IEnumerable<RouteListItem> completedAddresses = Entity.Addresses.Where(x => x.Status == RouteListItemStatus.Completed);
-
-			if(!completedAddresses.Any()) {
-				ServicesConfig.InteractiveService.ShowMessage(ImportanceLevel.Warning, "Для МЛ нет завершенных адресов, невозможно расчитать трек", "");
-				return;
-			}
-
-			if(completedAddresses.Count() > 1) {
-				foreach(RouteListItem address in Entity.Addresses.OrderBy(x => x.StatusLastUpdate)) {
-					if(address.Status == RouteListItemStatus.Completed) {
-						pointsToRecalculate.Add(new PointOnEarth((double)address.Order.DeliveryPoint.Latitude, (double)address.Order.DeliveryPoint.Longitude));
-					}
-				}
-
-				var recalculatedTrackResponse = OsrmMain.GetRoute(pointsToRecalculate, false, GeometryOverview.Full);
-				var recalculatedTrack = recalculatedTrackResponse.Routes.First();
-
-				totalDistanceTrack = recalculatedTrack.TotalDistanceKm;
-			} else {
-				var point = Entity.Addresses.First(x => x.Status == RouteListItemStatus.Completed).Order.DeliveryPoint;
-				pointsToRecalculate.Add(new PointOnEarth((double)point.Latitude, (double)point.Longitude));
-			}
-
-			pointsToBase.Add(pointsToRecalculate.Last());
-			pointsToBase.Add(new PointOnEarth(baseLat, baseLon));
-			pointsToBase.Add(pointsToRecalculate.First());
-
-			var recalculatedToBaseResponse = OsrmMain.GetRoute(pointsToBase, false, GeometryOverview.Full);
-			var recalculatedToBase = recalculatedToBaseResponse.Routes.First();
-
-			Entity.RecalculatedDistance = decimal.Round(totalDistanceTrack + recalculatedToBase.TotalDistanceKm);
-		}
 	}
 }
 

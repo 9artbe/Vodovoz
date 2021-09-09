@@ -1,24 +1,28 @@
-﻿using System;
-using System.Collections.Generic;
+﻿using System.Collections.Generic;
 using System.Linq;
 using Gamma.GtkWidgets;
 using Gtk;
 using NHibernate;
 using NHibernate.Criterion;
 using NHibernate.Dialect.Function;
+using QS.DomainModel.UoW;
 using Vodovoz.Domain.Client;
 using Vodovoz.Domain.Employees;
 using Vodovoz.Domain.Goods;
 using Vodovoz.Domain.Orders;
-using Vodovoz.JournalFilters;
-using Vodovoz.Repositories;
+using Vodovoz.EntityRepositories.Undeliveries;
 using Vodovoz.SidePanel.InfoProviders;
+using Vodovoz.ViewModels.Journals.FilterViewModels.Orders;
+using IUndeliveredOrdersInfoProvider = Vodovoz.ViewModels.Infrastructure.InfoProviders.IUndeliveredOrdersInfoProvider;
 
 namespace Vodovoz.SidePanel.InfoViews
 {
 	[System.ComponentModel.ToolboxItem(true)]
 	public partial class UndeliveredOrdersPanelView : Gtk.Bin, IPanelView
 	{
+		private readonly IUnitOfWork _uow;
+		private readonly IUndeliveredOrdersRepository _undeliveredOrdersRepository = new UndeliveredOrdersRepository();
+		
 		public UndeliveredOrdersPanelView()
 		{
 			this.Build();
@@ -27,7 +31,7 @@ namespace Vodovoz.SidePanel.InfoViews
 			Gdk.Color gr = new Gdk.Color(223, 223, 223);
 			yTreeView.ColumnsConfig = ColumnsConfigFactory.Create<object[]>()
 				.AddColumn("Виновный")
-					.AddTextRenderer(n => n[0].ToString())
+					.AddTextRenderer(n => n[0] != null ? n[0].ToString() : "")
 					.WrapWidth(150).WrapMode(Pango.WrapMode.WordChar)
 				.AddColumn("Кол-во")
 					.AddTextRenderer(n => n[1].ToString())
@@ -35,6 +39,8 @@ namespace Vodovoz.SidePanel.InfoViews
 				.RowCells()
 					.AddSetter<CellRenderer>((c, n) => c.CellBackgroundGdk = (int)n[2] % 2 == 0 ? wh : gr)
 				.Finish();
+			
+			_uow = UnitOfWorkFactory.CreateWithoutRoot();
 		}
 
 		List<object[]> guilties = new List<object[]>();
@@ -49,7 +55,7 @@ namespace Vodovoz.SidePanel.InfoViews
 
 		public void Refresh()
 		{
-			var undeliveredOrdersFilter = (InfoProvider as IUndeliveredOrdersInfoProvider).UndeliveredOrdersFilter;
+			var undeliveredOrdersFilter = (InfoProvider as IUndeliveredOrdersInfoProvider)?.UndeliveredOrdersFilterViewModel;
 
 			guilties = new List<object[]>(GetGuilties(undeliveredOrdersFilter));
 
@@ -58,7 +64,7 @@ namespace Vodovoz.SidePanel.InfoViews
 
 		#endregion
 
-		private void DrawRefreshed(UndeliveredOrdersFilter undeliveredOrdersFilter)
+		private void DrawRefreshed(UndeliveredOrdersFilterViewModel undeliveredOrdersFilter)
 		{
 			lblCaption.Markup = "<u><b>Сводка по недовозам\nСписок виновных:</b></u>";
 
@@ -73,7 +79,7 @@ namespace Vodovoz.SidePanel.InfoViews
 
 		#region Queries
 
-		public IList<object[]> GetGuilties(UndeliveredOrdersFilter filter)
+		public IList<object[]> GetGuilties(UndeliveredOrdersFilterViewModel filter)
 		{
 			OrderItem orderItemAlias = null;
 			Nomenclature nomenclatureAlias = null;
@@ -86,6 +92,7 @@ namespace Vodovoz.SidePanel.InfoViews
 			DeliveryPoint undeliveredOrderDeliveryPointAlias = null;
 			Subdivision subdivisionAlias = null;
 			GuiltyInUndelivery guiltyInUndeliveryAlias = null;
+			Employee authorAlias = null;
 
 			var subquery19LWatterQty = QueryOver.Of<OrderItem>(() => orderItemAlias)
 												.Where(() => orderItemAlias.Order.Id == oldOrderAlias.Id)
@@ -93,17 +100,18 @@ namespace Vodovoz.SidePanel.InfoViews
 												.Where(n => n.Category == NomenclatureCategory.water && n.TareVolume == TareVolume.Vol19L)
 												.Select(Projections.Sum(() => orderItemAlias.Count));
 
-			var query = InfoProvider.UoW.Session.QueryOver<UndeliveredOrder>(() => undeliveredOrderAlias)
-						   .Left.JoinAlias(u => u.OldOrder, () => oldOrderAlias)
-						   .Left.JoinAlias(u => u.NewOrder, () => newOrderAlias)
-						   .Left.JoinAlias(() => oldOrderAlias.Client, () => counterpartyAlias)
-						   .Left.JoinAlias(() => oldOrderAlias.Author, () => oldOrderAuthorAlias)
-						   .Left.JoinAlias(() => oldOrderAlias.DeliveryPoint, () => undeliveredOrderDeliveryPointAlias)
-						   .Left.JoinAlias(() => undeliveredOrderAlias.GuiltyInUndelivery, () => guiltyInUndeliveryAlias)
-						   .Left.JoinAlias(() => guiltyInUndeliveryAlias.GuiltyDepartment, () => subdivisionAlias);
+			var query = _uow.Session.QueryOver<UndeliveredOrder>(() => undeliveredOrderAlias)
+				.Left.JoinAlias(u => u.OldOrder, () => oldOrderAlias)
+				.Left.JoinAlias(u => u.NewOrder, () => newOrderAlias)
+				.Left.JoinAlias(() => oldOrderAlias.Client, () => counterpartyAlias)
+				.Left.JoinAlias(() => oldOrderAlias.Author, () => oldOrderAuthorAlias)
+				.Left.JoinAlias(() => oldOrderAlias.DeliveryPoint, () => undeliveredOrderDeliveryPointAlias)
+				.Left.JoinAlias(() => undeliveredOrderAlias.GuiltyInUndelivery, () => guiltyInUndeliveryAlias)
+				.Left.JoinAlias(() => guiltyInUndeliveryAlias.GuiltyDepartment, () => subdivisionAlias)
+				.Left.JoinAlias(u => u.Author, () => authorAlias);
 
 			if(filter?.RestrictDriver != null) {
-				var oldOrderIds = UndeliveredOrdersRepository.GetListOfUndeliveryIdsForDriver(InfoProvider.UoW, filter.RestrictDriver);
+				var oldOrderIds = _undeliveredOrdersRepository.GetListOfUndeliveryIdsForDriver(_uow, filter.RestrictDriver);
 				query.Where(() => oldOrderAlias.Id.IsIn(oldOrderIds.ToArray()));
 			}
 
@@ -134,7 +142,7 @@ namespace Vodovoz.SidePanel.InfoViews
 			if(filter?.RestrictGuiltySide != null)
 				query.Where(() => guiltyInUndeliveryAlias.GuiltySide == filter.RestrictGuiltySide);
 
-			if(filter != null && filter.IsProblematicCasesChkActive)
+			if(filter != null && filter.RestrictIsProblematicCases)
 				query.Where(() => !guiltyInUndeliveryAlias.GuiltySide.IsIn(filter.ExcludingGuiltiesForProblematicCases));
 
 			if(filter?.RestrictGuiltyDepartment != null)
@@ -156,26 +164,39 @@ namespace Vodovoz.SidePanel.InfoViews
 			if(filter?.RestrictUndeliveryAuthor != null)
 				query.Where(u => u.Author == filter.RestrictUndeliveryAuthor);
 
+
+			if(filter?.RestrictAuthorSubdivision != null)
+			{
+				query.Where(() => authorAlias.Subdivision.Id == filter.RestrictAuthorSubdivision.Id);
+			}
+
 			int position = 0;
-			var result = query.SelectList(list => list
-										.SelectGroup(u => u.Id)
-										.Select(
-											  Projections.SqlFunction(
-												  new SQLFunctionTemplate(
-													  NHibernateUtil.String,
-													  "GROUP_CONCAT(CASE ?1 WHEN 'Department' THEN IFNULL(CONCAT('Отд: ', ?2), 'Отдел ВВ') WHEN 'Client' THEN 'Клиент' WHEN 'Driver' THEN 'Водитель' WHEN 'ServiceMan' THEN 'Мастер СЦ' WHEN 'None' THEN 'Нет (не недовоз)' WHEN 'Unknown' THEN 'Неизвестно' ELSE ?1 END ORDER BY ?1 ASC SEPARATOR '\n')"
-													 ),
-												  NHibernateUtil.String,
-												  Projections.Property(() => guiltyInUndeliveryAlias.GuiltySide),
-												  Projections.Property(() => subdivisionAlias.ShortName)
-												 )
-											 )
-										 .SelectSubQuery(subquery19LWatterQty)
-										 )
-							  .List<object[]>()
-							  .GroupBy(x => x[1])
-							  .Select(r => new[] { r.Key, r.Count(), position++, r.Sum(x => x[2] == null ? 0 : (decimal)x[2]) })
-							  .ToList();
+			var result = 
+				query.SelectList(list => list
+					.SelectGroup(u => u.Id)
+					.Select(Projections.SqlFunction(
+						new SQLFunctionTemplate(
+							NHibernateUtil.String,
+							"GROUP_CONCAT(" +
+							"CASE ?1 " +
+							$"WHEN '{nameof(GuiltyTypes.Department)}' THEN IFNULL(CONCAT('Отд: ', ?2), 'Отдел ВВ') " +
+							$"WHEN '{nameof(GuiltyTypes.Client)}' THEN 'Клиент' " +
+							$"WHEN '{nameof(GuiltyTypes.Driver)}' THEN 'Водитель' " +
+							$"WHEN '{nameof(GuiltyTypes.ServiceMan)}' THEN 'Мастер СЦ' " +
+							$"WHEN '{nameof(GuiltyTypes.ForceMajor)}' THEN 'Форс-мажор' " +
+							$"WHEN '{nameof(GuiltyTypes.None)}' THEN 'Нет (не недовоз)' " +
+							$"WHEN '{nameof(GuiltyTypes.Unknown)}' THEN 'Неизвестно' " +
+							"ELSE ?1 " +
+							"END ORDER BY ?1 ASC SEPARATOR '\n')"
+						 ),
+						NHibernateUtil.String,
+						Projections.Property(() => guiltyInUndeliveryAlias.GuiltySide),
+						Projections.Property(() => subdivisionAlias.ShortName)))
+					.SelectSubQuery(subquery19LWatterQty))
+				.List<object[]>()
+				.GroupBy(x => x[1])
+				.Select(r => new[] { r.Key, r.Count(), position++, r.Sum(x => x[2] == null ? 0 : (decimal)x[2]) })
+				.ToList();
 			return result;
 		}
 

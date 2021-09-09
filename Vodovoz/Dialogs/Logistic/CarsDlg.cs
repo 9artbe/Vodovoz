@@ -7,14 +7,12 @@ using QS.DomainModel.UoW;
 using QS.Project.DB;
 using QSOrmProject;
 using QS.Validation;
-using Vodovoz.Domain.Employees;
 using Vodovoz.Domain.Logistic;
 using Vodovoz.Domain.Sale;
-using Vodovoz.Filters.ViewModels;
-using Vodovoz.ViewModel;
 using QS.Project.Services;
 using Vodovoz.EntityRepositories.Logistic;
 using QS.Dialog.GtkUI;
+using Vodovoz.TempAdapters;
 
 namespace Vodovoz
 {
@@ -23,6 +21,7 @@ namespace Vodovoz
 		private static Logger logger = LogManager.GetCurrentClassLogger();
 
 		private ICarRepository carRepository;
+		private readonly IEmployeeJournalFactory _employeeJournalFactory = new EmployeeJournalFactory();
 
 		public override bool HasChanges => UoWGeneric.HasChanges || attachmentFiles.HasChanges;
 
@@ -57,6 +56,8 @@ namespace Vodovoz
 			comboDriverCarKind.ItemsList = UoW.GetAll<DriverCarKind>();
 			comboDriverCarKind.Binding.AddBinding(Entity, e => e.DriverCarKind, w => w.SelectedItem).InitializeFromSource();
 
+			orderNumberSpin.Binding.AddBinding(Entity, e => e.OrderNumber, w => w.ValueAsInt).InitializeFromSource();
+
 			yentryVIN.Binding.AddBinding(Entity, e => e.VIN, w => w.Text).InitializeFromSource();
 			yentryManufactureYear.Binding.AddBinding(Entity, e => e.ManufactureYear, w => w.Text).InitializeFromSource();
 			yentryMotorNumber.Binding.AddBinding(Entity, e => e.MotorNumber, w => w.Text).InitializeFromSource();
@@ -74,13 +75,10 @@ namespace Vodovoz
 			yentryPTSNum.Binding.AddBinding(Entity, e => e.DocPTSNumber, w => w.Text).InitializeFromSource();
 			yentryPTSSeries.Binding.AddBinding(Entity, e => e.DocPTSSeries, w => w.Text).InitializeFromSource();
 			
-			var filter = new EmployeeFilterViewModel();
-			filter.SetAndRefilterAtOnce(
-				x => x.RestrictCategory = EmployeeCategory.driver,
-				x => x.Status = EmployeeStatus.IsWorking
-			);
-			dataentryreferenceDriver.RepresentationModel = new EmployeesVM(filter);
-			dataentryreferenceDriver.Binding.AddBinding(Entity, e => e.Driver, w => w.Subject).InitializeFromSource();
+			entryDriver.SetEntityAutocompleteSelectorFactory(
+				_employeeJournalFactory.CreateWorkingDriverEmployeeAutocompleteSelectorFactory());
+			entryDriver.Changed += OnEntryDriverChanged;
+			entryDriver.Binding.AddBinding(Entity, e => e.Driver, w => w.Subject).InitializeFromSource();
 
 			dataentryFuelType.SubjectType = typeof(FuelType);
 			dataentryFuelType.Binding.AddBinding(Entity, e => e.FuelType, w => w.Subject).InitializeFromSource();
@@ -107,14 +105,22 @@ namespace Vodovoz
 				}
 			};
 
-			checkIsRaskat.Toggled += (s, e) => { 
-				if (!carRepository.IsInAnyRouteList(UoW, Entity)) {
+			checkIsRaskat.Toggled += (s, e) => {
+				if(Entity.Id == 0 || !carRepository.IsInAnyRouteList(UoW, Entity)) {
 					Entity.IsRaskat = checkIsRaskat.Active;
-				} else if (checkIsRaskat.Active != Entity.IsRaskat) {
+				}
+				else if(checkIsRaskat.Active != Entity.IsRaskat) {
 					checkIsRaskat.Active = Entity.IsRaskat;
 					MessageDialogHelper.RunWarningDialog("На данном автомобиле есть МЛ, смена типа невозможна");
-                }
+				}
 			};
+			labelRaskatType.Binding.AddBinding(Entity, e => e.IsRaskat, w => w.Visible).InitializeFromSource();
+			
+			enumRaskatType.ItemsEnum = typeof(RaskatType);
+			enumRaskatType.ShowSpecialStateNot = true;
+			enumRaskatType.Binding.AddBinding(Entity, e => e.IsRaskat, w => w.Visible).InitializeFromSource();
+			enumRaskatType.Binding.AddBinding(Entity, e => e.RaskatType, w => w.SelectedItemOrNull).InitializeFromSource();
+			enumRaskatType.Binding.AddFuncBinding(Entity, e => e.Id == 0, w => w.Sensitive).InitializeFromSource();
 
 			checkIsArchive.Binding.AddBinding(Entity, e => e.IsArchive, w => w.Active).InitializeFromSource();
 
@@ -123,11 +129,15 @@ namespace Vodovoz
 				attachmentFiles.ItemId = UoWGeneric.Root.Id;
 				attachmentFiles.UpdateFileList();
 			}
-			OnDataentryreferenceDriverChanged(null, null);
+			OnEntryDriverChanged(null, null);
 			textDriverInfo.Selectable = true;
 
 			int currentUserId = ServicesConfig.CommonServices.UserService.CurrentUserId;
-			bool canChangeVolumeWeightConsumption = ServicesConfig.CommonServices.PermissionService.ValidateUserPresetPermission("can_change_cars_volume_weight_consumption", currentUserId) || Entity.Id == 0 || !Entity.IsCompanyCar;
+			bool canChangeVolumeWeightConsumption = 
+				ServicesConfig.CommonServices.PermissionService.ValidateUserPresetPermission("can_change_cars_volume_weight_consumption", currentUserId)
+				|| Entity.Id == 0
+				|| !(Entity.IsCompanyCar || Entity.IsRaskat);
+
 			bool canChangeBottlesFromAddress = ServicesConfig.CommonServices.PermissionService.ValidateUserPresetPermission("can_change_cars_bottles_from_address", currentUserId);
 
 			dataspinbutton1.Sensitive = canChangeVolumeWeightConsumption;
@@ -192,7 +202,7 @@ namespace Vodovoz
 				notebook1.CurrentPage = 2;
 		}
 
-		protected void OnDataentryreferenceDriverChanged(object sender, EventArgs e)
+		protected void OnEntryDriverChanged(object sender, EventArgs e)
 		{
 			if(UoWGeneric.Root.Driver != null) {
 				var docs = Entity.Driver.GetMainDocuments();
@@ -248,7 +258,6 @@ namespace Vodovoz
 
 		private void UpdateSensitivity()
 		{
-			dataentryreferenceDriver.Sensitive = Entity.TypeOfUse.HasValue && !Entity.IsCompanyCar;
 			comboDriverCarKind.Sensitive = Entity.TypeOfUse.HasValue && !Entity.IsCompanyCar;
 		}
 	}

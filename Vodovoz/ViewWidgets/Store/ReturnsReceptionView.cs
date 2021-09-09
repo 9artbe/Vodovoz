@@ -9,6 +9,8 @@ using NHibernate.Dialect.Function;
 using NHibernate.Transform;
 using QS.DomainModel.Entity;
 using QS.DomainModel.UoW;
+using QS.Project.Dialogs;
+using QS.Project.Services;
 using QSOrmProject;
 using Vodovoz.Core.DataService;
 using Vodovoz.Domain.Documents;
@@ -18,8 +20,11 @@ using Vodovoz.Domain.Operations;
 using Vodovoz.Domain.Orders;
 using Vodovoz.Domain.Service;
 using Vodovoz.Domain.Store;
+using Vodovoz.EntityRepositories.Logistic;
+using Vodovoz.EntityRepositories.Stock;
 using Vodovoz.EntityRepositories.Store;
 using Vodovoz.EntityRepositories.Subdivisions;
+using Vodovoz.Parameters;
 using Vodovoz.Repository.Store;
 using Vodovoz.Services;
 
@@ -29,9 +34,12 @@ namespace Vodovoz
 	public partial class ReturnsReceptionView : QS.Dialog.Gtk.WidgetOnDialogBase
 	{
 		GenericObservableList<ReceptionItemNode> ReceptionReturnsList = new GenericObservableList<ReceptionItemNode>();
-		private readonly ITerminalNomenclatureProvider terminalNomenclatureProvider = new BaseParametersProvider();
-		private readonly ICarLoadDocumentRepository carLoadDocumentRepository = new CarLoadDocumentRepository();
-		private readonly ICarUnloadRepository carUnloadRepository = CarUnloadSingletonRepository.GetInstance();
+		private readonly ITerminalNomenclatureProvider _terminalNomenclatureProvider;
+		private readonly ISubdivisionRepository _subdivisionRepository;
+		private readonly ICarLoadDocumentRepository _carLoadDocumentRepository;
+		private readonly ICarUnloadRepository _carUnloadRepository;
+		
+		private bool? _userHasOnlyAccessToWarehouseAndComplaints;
 
 		public IList<ReceptionItemNode> Items => ReceptionReturnsList;
 
@@ -39,7 +47,14 @@ namespace Vodovoz
 
 		public ReturnsReceptionView()
 		{
-			this.Build();
+			var baseParameters = new BaseParametersProvider(new ParametersProvider());
+			_terminalNomenclatureProvider = baseParameters;
+			var routeListRepository = new RouteListRepository(new StockRepository(), baseParameters);
+			_carLoadDocumentRepository = new CarLoadDocumentRepository(routeListRepository);
+			_carUnloadRepository = new CarUnloadRepository();
+			_subdivisionRepository = new SubdivisionRepository(new ParametersProvider());
+
+			Build();
 
 			ytreeReturns.ColumnsConfig = Gamma.GtkWidgets.ColumnsConfigFactory.Create<ReceptionItemNode>()
 				.AddColumn("Номенклатура").AddTextRenderer(node => node.Name)
@@ -80,7 +95,7 @@ namespace Vodovoz
 			get => warehouse;
 			set {
 				warehouse = value;
-				FillListReturnsFromRoute(terminalNomenclatureProvider.GetNomenclatureIdForTerminal);
+				FillListReturnsFromRoute(_terminalNomenclatureProvider.GetNomenclatureIdForTerminal);
 			}
 		}
 
@@ -92,7 +107,7 @@ namespace Vodovoz
 					return;
 				routeList = value;
 				if(routeList != null) {
-					FillListReturnsFromRoute(terminalNomenclatureProvider.GetNomenclatureIdForTerminal);
+					FillListReturnsFromRoute(_terminalNomenclatureProvider.GetNomenclatureIdForTerminal);
 				} else {
 					ReceptionReturnsList.Clear();
 				}
@@ -126,11 +141,12 @@ namespace Vodovoz
 			ReceptionItemNode returnableTerminal = null;
 			int loadedTerminalAmount = default(int);
 
-			var cashSubdivision = new SubdivisionRepository().GetCashSubdivisions(uow);
+			var cashSubdivision = _subdivisionRepository.GetCashSubdivisions(uow);
 			if(cashSubdivision.Contains(Warehouse.OwningSubdivision)) {
 				
-				loadedTerminalAmount = (int)carLoadDocumentRepository.LoadedTerminalAmount(UoW, RouteList.Id, terminalId);
-				var unloadedTerminalAmount = (int)carUnloadRepository.UnloadedTerminalAmount(UoW, RouteList.Id, terminalId);
+				loadedTerminalAmount = (int)_carLoadDocumentRepository.LoadedTerminalAmount(UoW, RouteList.Id, terminalId);
+
+				var unloadedTerminalAmount = (int)_carUnloadRepository.UnloadedTerminalAmount(UoW, RouteList.Id, terminalId);
 
 				if (loadedTerminalAmount > 0)
                 {
@@ -228,6 +244,20 @@ namespace Vodovoz
 				QueryOver.Of<Nomenclature>().Where(x => x.Category.IsIn(allowCategories))
 			);
 			SelectNomenclatureDlg.Mode = OrmReferenceMode.MultiSelect;
+
+			if(_userHasOnlyAccessToWarehouseAndComplaints == null)
+			{
+				_userHasOnlyAccessToWarehouseAndComplaints =
+					ServicesConfig.CommonServices.CurrentPermissionService.ValidatePresetPermission(
+						"user_have_access_only_to_warehouse_and_complaints")
+					&& !ServicesConfig.CommonServices.UserService.GetCurrentUser(UoW).IsAdmin;
+			}
+
+			if(_userHasOnlyAccessToWarehouseAndComplaints.Value)
+			{
+				SelectNomenclatureDlg.ButtonMode = ReferenceButtonMode.None;
+			}
+
 			SelectNomenclatureDlg.ObjectSelected += SelectNomenclatureDlg_ObjectSelected;
 			MyTab.TabParent.AddSlaveTab(MyTab, SelectNomenclatureDlg);
 		}

@@ -1,7 +1,6 @@
 using QSReport;
 using System;
 using System.Collections.Generic;
-using System.ComponentModel;
 using System.Data.Bindings.Collections.Generic;
 using System.Linq;
 using FluentNHibernate.Conventions;
@@ -25,19 +24,26 @@ using QSDocTemplates;
 using QS.DocTemplates;
 using System.IO;
 using QS.Dialog.GtkUI;
+using Vodovoz.EntityRepositories.Counterparties;
 
 namespace Vodovoz.Additions.Accounting
 {
     public class WayBillDocumentGenerator : PropertyChangedBase, IDomainObject
     {
-        private readonly IWayBillDocumentRepository repository;
-        private readonly RouteGeometryCalculator DistanceCalculator;
+        private readonly IWayBillDocumentRepository _wayBillDocumentRepository;
+        private readonly RouteGeometryCalculator _distanceCalculator;
+        private readonly IDocTemplateRepository _docTemplateRepository;
 
-        public WayBillDocumentGenerator(IUnitOfWork unitOfWork, IWayBillDocumentRepository repository, RouteGeometryCalculator calculator)
+        public WayBillDocumentGenerator(
+	        IUnitOfWork unitOfWork,
+	        IWayBillDocumentRepository repository,
+	        RouteGeometryCalculator calculator,
+	        IDocTemplateRepository docTemplateRepository)
         {
-            this.uow = unitOfWork ?? throw new ArgumentNullException(nameof(unitOfWork));
-            this.repository = repository ?? throw new ArgumentNullException(nameof(repository));
-            this.DistanceCalculator = calculator ?? throw new ArgumentNullException(nameof(calculator));
+            uow = unitOfWork ?? throw new ArgumentNullException(nameof(unitOfWork));
+            _wayBillDocumentRepository = repository ?? throw new ArgumentNullException(nameof(repository));
+            _distanceCalculator = calculator ?? throw new ArgumentNullException(nameof(calculator));
+            _docTemplateRepository = docTemplateRepository ?? throw new ArgumentNullException(nameof(docTemplateRepository));
             DocPrinterInit();
         }
 
@@ -58,7 +64,6 @@ namespace Vodovoz.Additions.Accounting
         }
 
         IUnitOfWork uow;
-        RouteList currentRouteList;
 
         #region Events
 
@@ -118,7 +123,14 @@ namespace Vodovoz.Additions.Accounting
         
         public void PrintSelected(SelectablePrintDocument document = null)
         {
-            if(!cancelPrinting) {
+            if (Environment.OSVersion.Platform != PlatformID.MacOSX && Environment.OSVersion.Platform != PlatformID.Unix)
+            {
+                var settingsOperaation = new PrintOperation();
+                settingsOperaation.Run(PrintOperationAction.PrintDialog, null);
+                PrinterSettings = settingsOperaation.PrintSettings;
+            }
+
+            if (!cancelPrinting) {
                 MultiDocPrinter.PrinterSettings = PrinterSettings;
                 if(document == null)
                     MultiDocPrinter.PrintSelectedDocuments();
@@ -182,7 +194,7 @@ namespace Vodovoz.Additions.Accounting
             var randomizer = new Random();
 
             foreach (var day in startDate.Range(endDate)) {
-                var currentDayOrders = repository.GetOrdersForWayBillDocuments(uow, day, day.AddHours(23).AddMinutes(59).AddSeconds(59));
+                var currentDayOrders = _wayBillDocumentRepository.GetOrdersForWayBillDocuments(uow, day, day.AddHours(23).AddMinutes(59).AddSeconds(59));
 
                 foreach (var employeeToCarPair in employeeToCars)
                 {
@@ -244,14 +256,14 @@ namespace Vodovoz.Additions.Accounting
                 if (i == 0)
                 {
                     waybillItemsEnumerator.Current.Mileage =
-                        DistanceCalculator.DistanceFromBaseMeter(employee.Subdivision.GeographicGroup, orderEnumerator.Current.DeliveryPoint) * 2 / 1000;
+                        _distanceCalculator.DistanceFromBaseMeter(employee.Subdivision.GeographicGroup, orderEnumerator.Current.DeliveryPoint) * 2 / 1000;
 
                     wayBillDocument.HashPointsOfRoute.Add(CachedDistance.GetHash(employee.Subdivision.GeographicGroup));
                     deliveryPointFrom = orderEnumerator.Current.DeliveryPoint;
                 }
                 else if (i == lastId)
                 {
-                    waybillItemsEnumerator.Current.Mileage = DistanceCalculator.DistanceToBaseMeter(orderEnumerator.Current.DeliveryPoint,
+                    waybillItemsEnumerator.Current.Mileage = _distanceCalculator.DistanceToBaseMeter(orderEnumerator.Current.DeliveryPoint,
                         employee.Subdivision.GeographicGroup) * 2 / 1000;
 
                     if (orderEnumerator.Current.DeliveryPoint.CoordinatesExist)
@@ -262,7 +274,7 @@ namespace Vodovoz.Additions.Accounting
                 }
                 else
                 {
-                    waybillItemsEnumerator.Current.Mileage = DistanceCalculator.DistanceMeter(deliveryPointFrom,
+                    waybillItemsEnumerator.Current.Mileage = _distanceCalculator.DistanceMeter(deliveryPointFrom,
                         orderEnumerator.Current.DeliveryPoint) * 2 / 1000;
 
                     if (orderEnumerator.Current.DeliveryPoint.CoordinatesExist)
@@ -278,7 +290,7 @@ namespace Vodovoz.Additions.Accounting
                 return;
             }
 
-            wayBillDocument.Date = DateTime.Now;
+            wayBillDocument.Date = generationDate.Date;
             wayBillDocument.CarModel = car.Model;
             wayBillDocument.CarRegistrationNumber = car.RegistrationNumber;
             wayBillDocument.DriverFIO = employee.FullName;
@@ -298,10 +310,15 @@ namespace Vodovoz.Additions.Accounting
             wayBillDocument.CarFuelConsumption = (decimal)car.FuelConsumption;
 
             wayBillDocument.OrganizationName = "vodovoz-spb.ru";
-            wayBillDocument.RecalculatePlanedDistance(DistanceCalculator);
+            wayBillDocument.RecalculatePlanedDistance(_distanceCalculator);
 
             wayBillDocument.Organization = orders.First().Contract.Organization;
-            wayBillDocument.PrepareTemplate(uow);
+            wayBillDocument.PrepareTemplate(uow, _docTemplateRepository);
+
+            if (wayBillDocument.DocumentTemplate == null)
+            {
+                throw new Exception($"Не обнаружен шаблон Путевого листа для организации: {wayBillDocument.Organization.Name}");
+            }
 
             (wayBillDocument.DocumentTemplate.DocParser as WayBillDocumentParser).RootObject = wayBillDocument;
 

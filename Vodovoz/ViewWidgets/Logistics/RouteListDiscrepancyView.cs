@@ -13,7 +13,7 @@ namespace Vodovoz
 	{
 		public RouteListDiscrepancyView()
 		{
-			this.Build();
+			Build();
 			Configure();
 			Items = new List<Discrepancy>();
 		}
@@ -25,8 +25,19 @@ namespace Vodovoz
 			get => items;
 			set {
 				items = value;
-				ytreeview2.ItemsDataSource = items;
+                ytreeRouteListDiscrepancyItemsView.ItemsDataSource = items;
 			}
+		}
+
+		/// <summary>
+		/// Перезапись встроенного свойства Sensitive
+		/// Sensitive теперь работает только с таблицей
+		/// К сожалению Gtk обходит этот параметр, если выставлять Sensitive какому-либо элементу управления выше по дереву
+		/// </summary>
+		public new bool Sensitive
+        {
+			get => ytreeRouteListDiscrepancyItemsView.Sensitive;
+			set => ytreeRouteListDiscrepancyItemsView.Sensitive = value;
 		}
 
 		public IList<RouteListControlNotLoadedNode> ItemsLoaded { get; set; }
@@ -35,7 +46,7 @@ namespace Vodovoz
 		{
 			var colorRed = new Gdk.Color(0xee, 0x66, 0x66);
 			var colorWhite = new Gdk.Color(0xff, 0xff, 0xff);
-			ytreeview2.ColumnsConfig = ColumnsConfigFactory.Create<Discrepancy>()
+            ytreeRouteListDiscrepancyItemsView.ColumnsConfig = ColumnsConfigFactory.Create<Discrepancy>()
 				.AddColumn("Название")
 					.AddTextRenderer(node => node.Name)
 				.AddColumn("Недопо-\nгрузка")
@@ -76,14 +87,14 @@ namespace Vodovoz
 		}
 	}
 
-	public class EquipmentTypeGroupingResult
+	public class EquipmentKindGroupingResult
 	{
-		public EquipmentType EquipmentType { get; set; }
+		public EquipmentKind EquipmentKind { get; set; }
 		public int Amount { get; set; }
-		public static EquipmentTypeGroupingResult Selector(EquipmentType type, IEnumerable<int> amounts)
+		public static EquipmentKindGroupingResult Selector(EquipmentKind kind, IEnumerable<int> amounts)
 		{
-			return new EquipmentTypeGroupingResult {
-				EquipmentType = type,
+			return new EquipmentKindGroupingResult {
+				EquipmentKind = kind,
 				Amount = amounts.Sum()
 			};
 		}

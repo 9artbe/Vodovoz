@@ -2,42 +2,38 @@
 using System.Collections.Generic;
 using System.Linq;
 using QS.DomainModel.UoW;
-using QS.Dialog;
 using QS.Report;
 using QSReport;
 using QS.Dialog.GtkUI;
-using QS.Project.Journal.EntitySelector;
-using QS.Project.Services;
 using QS.Widgets;
-using QS.Widgets.GtkUI;
 using Vodovoz.Domain.Employees;
 using Vodovoz.Domain.Logistic;
-using Vodovoz.Filters.ViewModels;
-using Vodovoz.JournalViewModels;
-using Vodovoz.ViewModel;
+using Vodovoz.TempAdapters;
 
 namespace Vodovoz.ReportsParameters.Logistic
 {
 	[System.ComponentModel.ToolboxItem(true)]
 	public partial class MileageReport : SingleUoWWidgetBase, IParametersWidget
 	{
-		public MileageReport()
+		private readonly IEmployeeJournalFactory _employeeJournalFactory;
+		private readonly ICarJournalFactory _carJournalFactory;
+		
+		public MileageReport(
+			IEmployeeJournalFactory employeeJournalFactory,
+			ICarJournalFactory carJournalFactory)
 		{
-			this.Build();
+			_employeeJournalFactory = employeeJournalFactory ?? throw new ArgumentNullException(nameof(employeeJournalFactory));
+			_carJournalFactory = carJournalFactory ?? throw new ArgumentNullException(nameof(carJournalFactory));
+
+			Build();
+			Configure();
+		}
+
+		private void Configure()
+		{
 			UoW = UnitOfWorkFactory.CreateWithoutRoot();
-			entityviewmodelentryEmployee.SetEntityAutocompleteSelectorFactory(
-				new EntityAutocompleteSelectorFactory<EmployeesJournalViewModel>(typeof(Employee),
-					() =>
-					{
-						var employeeFilter = new EmployeeFilterViewModel{
-							Status = EmployeeStatus.IsWorking,
-							Category = EmployeeCategory.driver
-						};
-						return new EmployeesJournalViewModel(employeeFilter, UnitOfWorkFactory.GetDefaultFactory, ServicesConfig.CommonServices);
-					})
-				);
-			entityviewmodelentryCar.SetEntityAutocompleteSelectorFactory(
-				new DefaultEntityAutocompleteSelectorFactory<Car, CarJournalViewModel, CarJournalFilterViewModel>(ServicesConfig.CommonServices));
+			
+			ConfigureEntries();
 
 			ycheckbutton1.Toggled += (sender, args) =>
 			{
@@ -48,7 +44,14 @@ namespace Vodovoz.ReportsParameters.Logistic
 			};
 
 			validatedentryDifference.ValidationMode = ValidationType.Numeric;
+		}
+
+		private void ConfigureEntries()
+		{
+			entityviewmodelentryEmployee.SetEntityAutocompleteSelectorFactory(
+				_employeeJournalFactory.CreateWorkingDriverEmployeeAutocompleteSelectorFactory());
 			
+			entityviewmodelentryCar.SetEntityAutocompleteSelectorFactory(_carJournalFactory.CreateCarAutocompleteSelectorFactory());
 		}
 
 		#region IParametersWidget implementation
@@ -68,6 +71,7 @@ namespace Vodovoz.ReportsParameters.Logistic
 			parameters.Add("start_date", dateperiodpicker.StartDateOrNull);
 			parameters.Add("end_date", dateperiodpicker.EndDateOrNull);
 			parameters.Add("our_cars_only", ycheckbutton1.Active);
+            parameters.Add("any_status", checkAnyStatus.Active);
 			parameters.Add("car_id", (entityviewmodelentryCar.Subject as Car)?.Id ?? 0);
 			parameters.Add("employee_id", (entityviewmodelentryEmployee.Subject as Employee)?.Id ?? 0);
 			

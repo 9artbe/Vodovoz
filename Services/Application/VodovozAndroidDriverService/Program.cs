@@ -7,8 +7,8 @@ using Nini.Config;
 using NLog;
 using QS.Project.DB;
 using QSProjectsLib;
-using QSSupportLib;
 using Vodovoz.Core.DataService;
+using Vodovoz.Parameters;
 
 namespace VodovozAndroidDriverService
 {
@@ -71,7 +71,6 @@ namespace VodovozAndroidDriverService
 						System.Reflection.Assembly.GetAssembly (typeof(QS.Project.Domain.UserBase))
 				});
 
-				MainSupport.LoadBaseParameters();
 				QS.HistoryLog.HistoryMain.Enable();
 			}
 			catch(Exception ex) {
@@ -80,7 +79,7 @@ namespace VodovozAndroidDriverService
 
 
 			try {
-				DriverServiceStarter.StartService(driverServiceConfig, firebaseConfig, new BaseParametersProvider());
+				DriverServiceStarter.StartService(driverServiceConfig, firebaseConfig, new BaseParametersProvider(new ParametersProvider()));
 
 				UnixSignal[] signals = {
 					new UnixSignal (Signum.SIGINT),

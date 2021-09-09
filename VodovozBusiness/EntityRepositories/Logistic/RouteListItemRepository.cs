@@ -63,7 +63,7 @@ namespace Vodovoz.EntityRepositories.Logistic
 		{
 			if(routeListItem.Status == RouteListItemStatus.Transfered)
 				return false;
-			RouteListItemStatus[] undeliveryStatus = GetUndeliveryStatuses();
+			RouteListItemStatus[] undeliveryStatus = RouteListItem.GetUndeliveryStatuses();
 			foreach(var status in undeliveryStatus) {
 				if(routeListItem.Status == status)
 					return false;
@@ -78,13 +78,9 @@ namespace Vodovoz.EntityRepositories.Logistic
 			return anotherRouteListItem != null;
 		}
 
-		public RouteListItemStatus[] GetUndeliveryStatuses()
-		{
-			return new RouteListItemStatus[]
-				{
-					RouteListItemStatus.Canceled,
-					RouteListItemStatus.Overdue
-				};
-		}
+        public RouteListItem GetRouteListItemById(IUnitOfWork uow, int routeListAddressId)
+        {
+			return uow.GetById<RouteListItem>(routeListAddressId);
+        }
 	}
 }

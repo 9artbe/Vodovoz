@@ -8,24 +8,35 @@ using Vodovoz.Infrastructure.Permissions;
 using Vodovoz.Domain.Documents;
 using Vodovoz.Domain.Goods;
 using Vodovoz.Domain.Store;
-using Vodovoz.Repositories.HumanResources;
-using Vodovoz.Domain.Permissions;
 using Vodovoz.PermissionExtensions;
 using Vodovoz.EntityRepositories.Employees;
 using Vodovoz.EntityRepositories;
 using QS.DomainModel.Entity.EntityPermissions.EntityExtendedPermission;
+using QS.Project.Journal.EntitySelector;
+using QS.Project.Services;
+using Vodovoz.Domain.Client;
+using Vodovoz.Filters.ViewModels;
+using Vodovoz.FilterViewModels.Goods;
+using Vodovoz.JournalSelector;
+using Vodovoz.JournalViewModels;
+using Vodovoz.Parameters;
+using Vodovoz.TempAdapters;
 
 namespace Vodovoz
 {
 	public partial class IncomingWaterDlg : QS.Dialog.Gtk.EntityDialogBase<IncomingWater>
 	{
 		static NLog.Logger logger = NLog.LogManager.GetCurrentClassLogger();
+		private readonly IEmployeeRepository _employeeRepository = new EmployeeRepository();
+		private readonly IUserRepository _userRepository = new UserRepository();
+		private readonly IEntityAutocompleteSelectorFactory _warehouseAutocompleteSelectorFactory =
+			new WarehouseSelectorFactory();
 
 		public IncomingWaterDlg()
 		{
 			this.Build();
 			UoWGeneric = UnitOfWorkFactory.CreateWithNewRoot<IncomingWater>();
-			Entity.Author = EmployeeRepository.GetEmployeeForCurrentUser(UoW);
+			Entity.Author = _employeeRepository.GetEmployeeForCurrentUser(UoW);
 			if(Entity.Author == null) {
 				MessageDialogHelper.RunErrorDialog("Ваш пользователь не привязан к действующему сотруднику, вы не можете создавать складские документы, так как некого указывать в качестве кладовщика.");
 				FailInitialize = true;
@@ -57,35 +68,70 @@ namespace Vodovoz
 			}
 
 			var editing = StoreDocumentHelper.CanEditDocument(WarehousePermissions.IncomingWaterEdit, Entity.IncomingWarehouse, Entity.WriteOffWarehouse);
-			buttonFill.Sensitive = referenceProduct.IsEditable = spinAmount.Sensitive
-				= referenceSrcWarehouse.IsEditable = referenceDstWarehouse.IsEditable = editing;
+			buttonFill.Sensitive = yentryProduct.IsEditable = spinAmount.Sensitive = editing;
 			incomingwatermaterialview1.Sensitive = editing;
 
 			labelTimeStamp.Binding.AddBinding(Entity, e => e.DateString, w => w.LabelProp).InitializeFromSource();
 			spinAmount.Binding.AddBinding(Entity, e => e.Amount, w => w.ValueAsInt).InitializeFromSource();
 
-			referenceProduct.SubjectType = typeof(Nomenclature);
-			referenceProduct.Binding.AddBinding(Entity, e => e.Product, w => w.Subject).InitializeFromSource();
-			referenceSrcWarehouse.ItemsQuery = StoreDocumentHelper.GetRestrictedWarehouseQuery(WarehousePermissions.IncomingWaterEdit);
-			referenceSrcWarehouse.Binding.AddBinding(Entity, e => e.WriteOffWarehouse, w => w.Subject).InitializeFromSource();
-			referenceDstWarehouse.ItemsQuery = StoreDocumentHelper.GetRestrictedWarehouseQuery(WarehousePermissions.IncomingWaterEdit);
-			referenceDstWarehouse.Binding.AddBinding(Entity, e => e.IncomingWarehouse, w => w.Subject).InitializeFromSource();
+			var userHasOnlyAccessToWarehouseAndComplaints =
+				ServicesConfig.CommonServices.CurrentPermissionService.ValidatePresetPermission("user_have_access_only_to_warehouse_and_complaints")
+				&& !ServicesConfig.CommonServices.UserService.GetCurrentUser(UoW).IsAdmin;
+
+			if(userHasOnlyAccessToWarehouseAndComplaints)
+			{
+				sourceWarehouseEntry.CanEditReference = destinationWarehouseEntry.CanEditReference = false;
+			}
+			else
+			{
+				sourceWarehouseEntry.CanEditReference = destinationWarehouseEntry.CanEditReference = true;
+			}
+
+			sourceWarehouseEntry.SetEntityAutocompleteSelectorFactory(_warehouseAutocompleteSelectorFactory);
+			sourceWarehouseEntry.Binding.AddBinding(Entity, e => e.WriteOffWarehouse, w => w.Subject).InitializeFromSource();
+			destinationWarehouseEntry.SetEntityAutocompleteSelectorFactory(_warehouseAutocompleteSelectorFactory);
+			destinationWarehouseEntry.Binding.AddBinding(Entity, e => e.IncomingWarehouse, w => w.Subject).InitializeFromSource();
 
 			incomingwatermaterialview1.DocumentUoW = UoWGeneric;
 
-			var permmissionValidator = new EntityExtendedPermissionValidator(PermissionExtensionSingletonStore.GetInstance(), EmployeeSingletonRepository.GetInstance());
-			Entity.CanEdit = permmissionValidator.Validate(typeof(IncomingWater), UserSingletonRepository.GetInstance().GetCurrentUser(UoW).Id, nameof(RetroactivelyClosePermission));
+			var permmissionValidator =
+				new EntityExtendedPermissionValidator(PermissionExtensionSingletonStore.GetInstance(), _employeeRepository);
+			
+			Entity.CanEdit =
+				permmissionValidator.Validate(
+					typeof(IncomingWater), _userRepository.GetCurrentUser(UoW).Id, nameof(RetroactivelyClosePermission));
+			
 			if(!Entity.CanEdit && Entity.TimeStamp.Date != DateTime.Now.Date) {
 				spinAmount.Binding.AddFuncBinding(Entity, e => e.CanEdit, w => w.Sensitive).InitializeFromSource();
-				referenceProduct.Sensitive = false;
-				referenceDstWarehouse.Sensitive = false;
-				referenceSrcWarehouse.Sensitive = false;
+				yentryProduct.Sensitive = false;
+				destinationWarehouseEntry.Sensitive = false;
+				sourceWarehouseEntry.Sensitive = false;
 				buttonFill.Sensitive = false;
 				incomingwatermaterialview1.Sensitive = false;
 				buttonSave.Sensitive = false;
 			} else {
 				Entity.CanEdit = true;
 			}
+
+			var nomenclatureFilter = new NomenclatureFilterViewModel() { HidenByDefault = true };
+			var nomenclatureRepository = 
+				new EntityRepositories.Goods.NomenclatureRepository(new NomenclatureParametersProvider(new ParametersProvider()));
+
+			var counterpartySelectorFactory =
+				new DefaultEntityAutocompleteSelectorFactory<Counterparty, CounterpartyJournalViewModel, CounterpartyJournalFilterViewModel>(
+					ServicesConfig.CommonServices);
+			
+			var nomenclatureAutoCompleteSelectorFactory =
+				new NomenclatureAutoCompleteSelectorFactory<Nomenclature, NomenclaturesJournalViewModel>(
+					ServicesConfig.CommonServices,
+					nomenclatureFilter,
+					counterpartySelectorFactory,
+					nomenclatureRepository,
+					_userRepository
+				);
+			
+			yentryProduct.SetEntityAutocompleteSelectorFactory(nomenclatureAutoCompleteSelectorFactory);
+			yentryProduct.Binding.AddBinding(Entity, e => e.Product, w => w.Subject).InitializeFromSource();
 		}
 
 		public override bool Save ()
@@ -102,7 +148,7 @@ namespace Vodovoz
 			if (valid.RunDlgIfNotValid ((Gtk.Window)this.Toplevel))
 				return false;
 
-			Entity.LastEditor = EmployeeSingletonRepository.GetInstance().GetEmployeeForCurrentUser (UoW);
+			Entity.LastEditor = _employeeRepository.GetEmployeeForCurrentUser (UoW);
 			Entity.LastEditedTime = DateTime.Now;
 			if(Entity.LastEditor == null)
 			{

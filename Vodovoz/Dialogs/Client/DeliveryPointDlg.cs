@@ -1,6 +1,5 @@
 ﻿using System;
 using System.Linq;
-using Gamma.ColumnConfig;
 using Gamma.Utilities;
 using GMap.NET;
 using GMap.NET.GtkSharp;
@@ -13,11 +12,8 @@ using QS.DomainModel.UoW;
 using QS.Osm;
 using QS.Osm.DTO;
 using QS.Osm.Loaders;
-using QS.Project.Dialogs;
-using QS.Project.Dialogs.GtkUI;
 using QSProjectsLib;
 using QS.Validation;
-using Vodovoz.Dialogs.Phones;
 using Vodovoz.Domain.Client;
 using Vodovoz.Domain.Goods;
 using Vodovoz.Domain.Logistic;
@@ -26,7 +22,6 @@ using Vodovoz.SidePanel;
 using Vodovoz.SidePanel.InfoProviders;
 using Vodovoz.ViewModel;
 using QS.Tdi;
-using QSOsm;
 using Vodovoz.Parameters;
 using Vodovoz.EntityRepositories;
 using QS.Project.Services;
@@ -37,17 +32,28 @@ using Vodovoz.Models;
 using Vodovoz.ViewModels.ViewModels.Goods;
 using Vodovoz.TempAdapters;
 using System.Collections.Generic;
+using Gamma.Widgets;
+using Gtk;
+using Vodovoz.Additions.Logistic;
+using Vodovoz.EntityRepositories.Counterparties;
+using Vodovoz.ViewModels.ViewModels.Contacts;
+using IDeliveryPointInfoProvider = Vodovoz.ViewModels.Infrastructure.InfoProviders.IDeliveryPointInfoProvider;
 
 namespace Vodovoz
 {
+	[Obsolete("Есть новый диалог на MVVM DeliveryPointViewModel, этот диалог пока используется для открытия в representationEntry")]
 	public partial class DeliveryPointDlg : EntityDialogBase<DeliveryPoint>, IDeliveryPointInfoProvider, ITDICloseControlTab
 	{
 		protected static Logger logger = LogManager.GetCurrentClassLogger();
 		private Gtk.Clipboard clipboard = Gtk.Clipboard.Get(Gdk.Atom.Intern("CLIPBOARD", false));
+		private readonly IUserRepository _userRepository = new UserRepository();
+		private readonly IDeliveryPointRepository _deliveryPointRepository = new DeliveryPointRepository();
 
 		IPhoneRepository phoneRepository = new PhoneRepository();
 
 		GMapControl MapWidget;
+		private VBox _vboxMap;
+		private yEnumComboBox _comboMapProvider;
 		readonly GMapOverlay addressOverlay = new GMapOverlay();
 		GMapMarker addressMarker;
 		public DeliveryPoint DeliveryPoint => Entity;
@@ -107,7 +113,7 @@ namespace Vodovoz
 
 			ShowResidue();
 
-			ySpecCmbCategory.ItemsList = UoW.Session.QueryOver<DeliveryPointCategory>().Where(c => !c.IsArchive).List().OrderBy(c => c.Name);
+			ySpecCmbCategory.ItemsList = _deliveryPointRepository.GetActiveDeliveryPointCategories(UoW);
 			ySpecCmbCategory.Binding.AddBinding(Entity, e => e.Category, w => w.SelectedItem).InitializeFromSource();
 
 			comboRoomType.ItemsEnum = typeof(RoomType);
@@ -154,7 +160,7 @@ namespace Vodovoz
 			lblId.LabelProp = Entity.Id.ToString();
 
 			radioFixedPrices.Toggled += OnRadioFixedPricesToggled;
-			var nomenclatureParametersProvider = new NomenclatureParametersProvider();
+			var nomenclatureParametersProvider = new NomenclatureParametersProvider(new ParametersProvider());
 			var nomenclatureRepository = new NomenclatureRepository(nomenclatureParametersProvider);
 			var waterFixedPricesGenerator = new WaterFixedPricesGenerator(nomenclatureRepository);
 			var nomenclatureFixedPriceFactory = new NomenclatureFixedPriceFactory();
@@ -190,6 +196,7 @@ namespace Vodovoz
 					return;
 				}
 				entryBuilding.Street = new OsmStreet(-1, entryStreet.CityId, entryStreet.Street, entryStreet.StreetDistrict);
+				entryBuilding.House = string.Empty;
 			};
 
 			entryBuilding.FocusOutEvent += EntryBuilding_FocusOutEvent;
@@ -211,6 +218,12 @@ namespace Vodovoz
 				.InitializeFromSource();
 
 			chkAddCertificatesAlways.Binding.AddBinding(Entity, e => e.AddCertificatesAlways, w => w.Active).InitializeFromSource();
+
+			entryLunchTimeFrom.Binding.AddBinding(Entity, e => e.LunchTimeFrom, w => w.Time).InitializeFromSource();
+			entryLunchTimeTo.Binding.AddBinding(Entity, e => e.LunchTimeTo, w => w.Time).InitializeFromSource();
+
+			chkBeforeIntervalDelivery.RenderMode = QS.Widgets.RenderMode.Icon;
+			chkBeforeIntervalDelivery.Binding.AddBinding(Entity, e => e.IsBeforeIntervalDelivery, w => w.Active).InitializeFromSource();
 
 			cityBeforeChange = entryCity.City;
 			streetBeforeChange = entryStreet.Street;
@@ -234,11 +247,24 @@ namespace Vodovoz
 				WidthRequest = 450,
 				HasFrame = true
 			};
+
+			_vboxMap = new VBox();
+			_comboMapProvider = new yEnumComboBox();
+			_comboMapProvider.ItemsEnum = typeof(MapProviders);
+			_comboMapProvider.TooltipText = "Если карта отображается некорректно или не отображается вовсе - смените тип карты";
+			_comboMapProvider.EnumItemSelected += (sender, args) =>
+				MapWidget.MapProvider = MapProvidersHelper.GetPovider((MapProviders)args.SelectedItem);
+			_comboMapProvider.SelectedItem = MapProviders.GoogleMap;
+			_vboxMap.Add(_comboMapProvider);
+			_vboxMap.SetChildPacking(_comboMapProvider, false, false, 0, PackType.Start);
+
 			MapWidget.Overlays.Add(addressOverlay);
 			MapWidget.ButtonPressEvent += MapWidget_ButtonPressEvent;
 			MapWidget.ButtonReleaseEvent += MapWidget_ButtonReleaseEvent;
 			MapWidget.MotionNotifyEvent += MapWidget_MotionNotifyEvent;
-			rightsidepanel1.Panel = MapWidget;
+			_vboxMap.Add(MapWidget);
+			_vboxMap.ShowAll();
+			rightsidepanel1.Panel = _vboxMap;
 			rightsidepanel1.PanelOpened += Rightsidepanel1_PanelOpened;
 			rightsidepanel1.PanelHided += Rightsidepanel1_PanelHided;
 			Entity.PropertyChanged += Entity_PropertyChanged;
@@ -367,19 +393,15 @@ namespace Vodovoz
 
 				entryBuilding.GetCoordinates(out decimal? longitude, out decimal? latitude);
 
-				if(longitude == null || latitude == null)
-					return;
 				if(!addressChanged)
 					return;
 
 				cityBeforeChange = entryCity.City;
 				streetBeforeChange = entryStreet.Street;
 				buildingBeforeChange = entryBuilding.House;
-
-				if(!Entity.ManualCoordinates || (Entity.ManualCoordinates && MessageDialogHelper.RunQuestionDialog("Координаты были установлены вручную, заменить их на коордитаты адреса?"))) {
-					WriteCoordinates(latitude, longitude);
-					Entity.ManualCoordinates = false;
-				}
+				
+				WriteCoordinates(latitude, longitude);
+				Entity.ManualCoordinates = false;
 
 				if(entryBuilding.OsmHouse != null && !String.IsNullOrWhiteSpace(entryBuilding.OsmHouse.Name)) {
 					labelHouseName.Visible = true;
@@ -473,12 +495,6 @@ namespace Vodovoz
 				notebook1.CurrentPage = 0;
 		}
 
-		protected void OnRadioCommentsToggled(object sender, EventArgs e)
-		{
-			if(radioComments.Active)
-				notebook1.CurrentPage = 1;
-		}
-
 		private void OnRadioFixedPricesToggled(object sender, EventArgs e)
 		{
 			if (radioFixedPrices.Active)
@@ -487,7 +503,7 @@ namespace Vodovoz
 		
 		public void OpenFixedPrices()
 		{
-			notebook1.CurrentPage = 2;
+			notebook1.CurrentPage = 1;
 		}
 
 		protected void OnButtonInsertFromBufferClicked(object sender, EventArgs e)
@@ -522,7 +538,7 @@ namespace Vodovoz
 				return;
 
 			Entity.SetСoordinates(latitude, longitude, UoW);
-			Entity.СoordsLastChangeUser = Repositories.HumanResources.UserRepository.GetCurrentUser(UoW);
+			Entity.СoordsLastChangeUser = _userRepository.GetCurrentUser(UoW);
 		}
 
 		/// <summary>
